@@ -32,7 +32,7 @@ Cookie reauth, run in Docker on `home-server`, written in TypeScript, notificati
 | Area | Default | Why | Changeable? |
 | --- | --- | --- | --- |
 | Auth | Cookie reauth (full cookie header, or `ssid` alone) | No password, no captcha | No: every other route is worse |
-| Host | `home-server`, Docker container (Portainer stack) | Residential IP; Riot's Cloudflare often blocks VPS/cloud IPs | Another home machine yes; avoid VPS |
+| Host | `home-server`, Docker container (Compose project in `~/daily-drip`) | Residential IP; Riot's Cloudflare often blocks VPS/cloud IPs | Another home machine yes; avoid VPS |
 | Runtime | TypeScript on Bun, same version on the dev PC and in the Dockerfile | Runs TypeScript directly (no build step), built-in test runner and `.env` loading | Yes: Node 24 if the TLS spike fails under Bun. Bun-only APIs stay in `http.ts`, so switching touches one file |
 | Notifications | Discord bot (discord.js) posting in a private server | Phone push via the Discord app; 4 embeds with image, name and price in one message; slash commands; the gateway connection is outbound-only, so no open ports | Yes: behind a `Notifier` interface (Telegram, ntfy) |
 | Schedule | Arm from `...RemainingDurationInSeconds` + 90 s | No hardcoded reset time | No |
@@ -113,11 +113,11 @@ Verified 2026-11-23: the v3 response carries per-offer prices in `SingleItemStor
 
 ## Storage & secrets
 
-Treat the Riot cookie like a password that also bypasses 2FA ([SkinPeek wiki](https://github.com/giorgi-o/SkinPeek/wiki/How-to-get-your-Riot-cookies)). It lives only on the machine that runs the bot, in two files: the cookie file and the 0600 state file. It is never an environment variable, so it does not show up in `docker inspect` or in Portainer.
+Treat the Riot cookie like a password that also bypasses 2FA ([SkinPeek wiki](https://github.com/giorgi-o/SkinPeek/wiki/How-to-get-your-Riot-cookies)). It lives only on the machine that runs the bot, in two files: the cookie file and the 0600 state file. It is never an environment variable, so it does not show up in `docker inspect`.
 
-**Cookie file** (`config/riot-cookie`, mode 0600, never committed): one line, either the whole `cookie` request header (preferred: Storefront's README says the full set outlives `ssid` alone) or just the `ssid` value. A leading `cookie:`, a BOM and trailing newlines are tolerated. On the server it is `/opt/daily-drip/config/riot-cookie`, owned by uid 1000 (the image's `bun` user); `/opt/daily-drip/config` is bind-mounted read-only at `/app/config`.
+**Cookie file** (`config/riot-cookie`, mode 0600, never committed): one line, either the whole `cookie` request header (preferred: Storefront's README says the full set outlives `ssid` alone) or just the `ssid` value. A leading `cookie:`, a BOM and trailing newlines are tolerated. On the server it is `~/daily-drip/config/riot-cookie`, owned by uid 1000 (the image's `bun` user); that `config/` folder (mode 0700) is bind-mounted read-only at `/app/config`.
 
-Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer stack's Environment variables on the server.
+Variables come from `.env` on the dev PC (Bun loads it). On the server they come from `~/daily-drip/.env` (mode 0600), which Compose reads to fill `${VAR}` in `compose.yaml`; the file itself never enters the image or the container.
 
 | Variable | Required | How to get it |
 | --- | --- | --- |
@@ -246,22 +246,22 @@ daily-drip/
 3. Store + catalog + prices → `ShopSnapshot`.
 4. Discord bot: notifier, then `/shop`, the wishlist, and dedup (`lastSentHash`), so restarts during development post nothing new.
 5. Scheduler: next-reset timer, retry timer, dead-man switch, cookie-file polling, and the error table's delays and one-time alerts (the scheduler cannot pick a retry time without them).
-6. Docker and deploy: handed off in `docs/step-6-deploy.md`.
+6. Docker and deploy: `Dockerfile`, `compose.yaml`, `scripts/deploy.sh`; notes in `docs/step-6-deploy.md`.
 
-**Development on Windows:** the dev PC runs the bot directly with Bun, which runs natively on Windows. It needs neither Docker, WSL, the game nor the Riot Client. Docker runs only on `home-server`, where Portainer builds the image from the GitHub repo; the image is Linux either way.
+**Development on Windows:** the dev PC runs the bot directly with Bun, which runs natively on Windows. It needs neither Docker, WSL, the game nor the Riot Client. Docker runs only on `home-server`, which builds the image itself from the synced files; the image is Linux either way.
 
 - Install Bun (`winget install Oven-sh.Bun`), then `bun install` and `bun --watch src/main.ts`. Bun reads the local `.env` by itself, so no dotenv package.
 - Use a second Discord application for development, with its own token and channel. Two processes on one bot token would both answer `/shop`.
 - Use a separate Riot cookie for development, in the dev PC's own `config/riot-cookie`: sign in again in another browser profile. Each reauth rotates the cookie, so two machines sharing one cookie split its rotation and one copy dies (inferred).
 - If the dev PC is on the same home connection as `home-server`, the spike can run there first: same public IP, and Bun bundles its own BoringSSL, so the same Bun version should present the same TLS fingerprint on both. The acceptance check still runs on `home-server`.
 - Windows differences the code must tolerate: `chmod` does nothing there (not an error), and renaming over a file another process holds open can fail with `EPERM` (retry a few times).
-- Moving to the server: push to GitHub and let Portainer pull from it; don't copy the folder. Only code travels. The server gets its own variables (in Portainer), its own cookie file and the production Discord bot's token, and it starts with an empty `data/`. The dev `state.json` holds the dev cookie jar and must never be copied.
+- Moving to the server: `scripts/deploy.sh` syncs only what the image needs; don't copy the folder. Only code travels. The server gets its own `.env`, its own cookie file and the production Discord bot's token, and it starts with an empty `data/`. The dev `state.json` holds the dev cookie jar and must never be copied.
 
 **Deploy:** Dockerfile on `oven/bun:<version>-slim`, pinned to the dev PC's `bun --version`. There is no build stage: `bun install --frozen-lockfile --production`, then `bun src/main.ts` as the image's non-root `bun` user. Create `/app/data` and `chown` it to `bun` before `USER bun`: a new named volume copies that ownership, and without it the volume is root-owned and the bot cannot write state. Commit `bun.lock`.
 
-`compose.yaml` has one service with `restart: unless-stopped`, the named volume `daily-drip-data:/app/data`, the bind mount `/opt/daily-drip/config:/app/config:ro`, and its variables under `environment:` as `${VAR}`, plus `TZ`. Portainer fills `${VAR}` from the stack's Environment variables. There is no `env_file`: `.env` is gitignored, so a stack deployed from Git never sees it. Changing a variable means redeploying the stack (`docker restart` does not re-read variables); replacing the cookie never needs this.
+`compose.yaml` has one service with `restart: unless-stopped`, the named volume `daily-drip-data:/app/data`, the bind mount `./config:/app/config:ro`, and its variables under `environment:` as `${VAR}`; `TZ` defaults to UTC. Compose fills `${VAR}` from the `.env` next to `compose.yaml`. There is no `env_file`, so the container gets only the variables it uses. The container is locked down: read-only root filesystem, all capabilities dropped, `no-new-privileges`, 256 MB and 128 processes at most, logs capped at 10 MB × 3, no ports. Changing a variable means `docker compose up -d` again (`docker restart` does not re-read variables); replacing the cookie never needs this.
 
-Deploy it as a Portainer stack from the GitHub repo. The repo is private, so Portainer needs credentials: a fine-grained personal access token limited to this repo, with read-only Contents permission, entered as the stack's Git authentication.
+Deploy from the dev machine with `DEPLOY_HOST=<server> scripts/deploy.sh`: it copies `src/` and the build files to `~/daily-drip` with `rsync -rlt`, builds the image on the server and runs `docker compose up -d`. It never touches the server's `.env`, `config/` or the data volume, and it starts nothing until `.env` and `config/riot-cookie` exist. The server needs no GitHub access.
 
 ## Acceptance criteria
 
@@ -289,7 +289,7 @@ The main risk is that Riot changes these internal endpoints without notice, as i
 | Item | Status | How it gets resolved |
 | --- | --- | --- |
 | Cookie lifetime | No source gives a number | Log the date each cookie dies |
-| Bun's TLS from `home-server` | Passed from the dev PC (below) | Spike on `home-server`; fallback in Endpoints, TLS |
+| Bun's TLS from `home-server` | Passed from the dev PC (below). From `home-server`, in the container image, the cookie-less probe passed on 2026-11-23 (303 to the login page) | First real run on `home-server`; fallback in Endpoints, TLS |
 | discord.js on Bun | Works on the dev PC (discord.js 14.28.1, Bun 1.3.14): login, guild command registration, embeds, `/shop` | Check again in the container on `home-server` |
 
 **Verified by the spike on the dev PC** (2026-11-23, Bun 1.3.14, real cookie)

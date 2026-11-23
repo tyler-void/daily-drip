@@ -34,6 +34,20 @@ You need [Bun](https://bun.sh) 1.3.14, a Discord server of your own, and a Riot 
 
 `config/` and `data/` hold your cookie and the bot's state. Both are gitignored; keep it that way.
 
+## Run it in Docker
+
+To keep it running on a home server, use the included `Dockerfile` and `compose.yaml`. The container opens no ports and runs locked down (read-only, no capabilities, uid 1000).
+
+On the server, in the folder that holds `compose.yaml`:
+
+1. `.env` (mode 600): the four `DISCORD_` values, and `TZ` if you want local time in the logs.
+2. `config/riot-cookie` (mode 600, in a `config/` folder of mode 700 owned by uid 1000): the cookie from step 3 above. Sign in again for it; do not reuse a cookie that another copy of the bot is using, because Riot rotates it on every use and one copy would lose its session.
+3. `docker compose up -d --build`, then `docker compose logs -f`: expect "connected to Discord", then "shop posted".
+
+From another machine, `DEPLOY_HOST=<ssh name> scripts/deploy.sh` copies the code over SSH, builds the image on the server and restarts the container. It never touches the server's `.env` or `config/`.
+
+To replace the cookie later, overwrite `config/riot-cookie`; the bot notices within a minute. To change a variable, edit `.env` and run `docker compose up -d` again.
+
 ## Development
 
 `bun test`, `bun run typecheck`. The [spec](./Valorant%20Store%20Checker%20%E2%80%94%20Spec.md) is the design document and lists what has and has not been verified.

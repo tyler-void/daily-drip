@@ -1,0 +1,45 @@
+# One container, outbound connections only: no ports, no inbound network.
+#
+#   .env              next to this file, mode 600: the DISCORD_ values (see .env.example)
+#   config/           next to this file, mode 700: riot-cookie (mode 600, one line)
+#
+# Both are gitignored. The container runs as uid 1000, so that user must own config/.
+
+name: daily-drip
+
+services:
+  daily-drip:
+    build: .
+    image: daily-drip:local
+    container_name: daily-drip
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?set DISCORD_GUILD_ID in .env}
+      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set DISCORD_CHANNEL_ID in .env}
+      DISCORD_OWNER_ID: ${DISCORD_OWNER_ID:?set DISCORD_OWNER_ID in .env}
+      RIOT_COOKIE_FILE: /app/config/riot-cookie
+      RIOT_SHARD: ${RIOT_SHARD:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - daily-drip-data:/app/data
+      - ./config:/app/config:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  daily-drip-data:

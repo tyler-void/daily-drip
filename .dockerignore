@@ -1,0 +1,14 @@
+# Secrets and state: none of these may reach the image.
+# Bun loads a .env from the working directory by itself.
+.env
+.env.*
+config/
+data/
+
+# Not needed at run time
+.git/
+node_modules/
+test/
+scripts/
+docs/
+*.md
