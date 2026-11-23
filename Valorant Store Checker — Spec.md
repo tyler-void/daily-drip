@@ -269,7 +269,7 @@ The MVP is done when every box below is ticked on `home-server`, with the real a
 
 - [x] Spike: from `home-server`, E1 returns 303 with an `access_token`.
 - [x] One run posts a Discord message with 4 embeds whose names, images and VP prices match the in-game shop (checked by hand once), and it arrives as a push on the phone.
-- [ ] `/shop` from the owner shows the current shop without calling Riot; from another account it is refused.
+- [x] `/shop` from the owner shows the current shop without calling Riot; from another account it is refused.
 - [ ] `/wishlist add` with a gun suggests only that gun's skins; the entry survives a restart and pings when the skin is in the shop.
 - [x] Restarting the container the same day sends nothing new.
 - [ ] After the next reset, the new shop arrives within 5 minutes without manual action.

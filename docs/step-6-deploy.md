@@ -40,7 +40,7 @@ healthchecks.io: one check, period 1 day, grace 2 hours, ping URL in `HEALTHCHEC
 
 ## Acceptance still open (spec: Acceptance criteria, on `home-server`)
 
-1. `/shop` from another account is refused; a `/wishlist` entry survives a restart and pings when its skin is in the shop.
+1. A `/wishlist` entry survives a restart and pings when its skin is in the shop. (`/shop` from another account was refused, checked by the owner on 2026-11-23.)
 2. The automatic post after the next reset, a failed run at reset time being retried, and still working on day 3.
 3. Run the secret scan above once more at the end.
 4. **The broken-cookie test goes last.** Changing one character in the cookie file makes the bot replace its saved session with the broken one, so the working session is gone afterwards. Expect exactly one "cookie expired" ping and no retry loop. Then a fresh cookie goes into the file and the bot recovers within about a minute.
