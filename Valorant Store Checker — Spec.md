@@ -36,7 +36,7 @@ Cookie reauth, run in Docker on `home-server`, written in TypeScript, notificati
 | Runtime | TypeScript on Bun, same version on the dev PC and in the Dockerfile | Runs TypeScript directly (no build step), built-in test runner and `.env` loading | Yes: Node 24 if the TLS spike fails under Bun. Bun-only APIs stay in `http.ts`, so switching touches one file |
 | Notifications | Discord bot (discord.js) posting in a private server | Phone push via the Discord app; 4 embeds with image, name and price in one message; slash commands; the gateway connection is outbound-only, so no open ports | Yes: behind a `Notifier` interface (Telegram, ntfy) |
 | Schedule | Arm from `...RemainingDurationInSeconds` + 90 s | No hardcoded reset time | No |
-| Repo | Private on GitHub: `tyler-void/daily-drip` | Uses unofficial endpoints and handles account cookies | Yes |
+| Repo | GitHub `tyler-void/daily-drip`, MIT. Public | The repo holds no secret: the cookie and state live in `config/` and `data/`, which are gitignored. Public lets friends run their own copy instead of handing over their cookies | Yes |
 
 Reference implementations: [SkinPeek](https://github.com/giorgi-o/SkinPeek) (archived 2025-06-04) and [exoflex6/Storefront](https://github.com/exoflex6/Storefront) (its single-user replacement, same flow). Read their code when this spec is silent on a detail.
 

@@ -70,8 +70,8 @@ A second Discord application, for example `daily-drip`, separate from `daily-dri
 
 ### 6. Portainer stack
 
-1. GitHub → Settings → Developer settings → fine-grained token: only `tyler-void/daily-drip`, **Contents: Read-only**.
-2. Portainer → Stacks → Add stack → Repository: `https://github.com/tyler-void/daily-drip`, reference `refs/heads/main`, compose path `compose.yaml`, authentication with that token.
+1. While the repo is private: GitHub → Settings → Developer settings → fine-grained token, only `tyler-void/daily-drip`, **Contents: Read-only**.
+2. Portainer → Stacks → Add stack → Repository: `https://github.com/tyler-void/daily-drip`, reference `refs/heads/main`, compose path `compose.yaml`, authentication with that token while the repo is private.
 3. Environment variables: the four `DISCORD_` values, plus `HEALTHCHECK_URL`, `LOG_LEVEL` and `RIOT_SHARD` if wanted.
 4. Check that Portainer builds `build: .` for this environment. If it does not, build from a clone on the host with `docker compose up -d --build`, giving the same variables through a `.env` next to `compose.yaml`. That `.env` is gitignored; keep it mode 600.
 
