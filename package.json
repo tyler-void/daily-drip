@@ -1,0 +1,9 @@
+{
+  "name": "daily-drip",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike": "bun scripts/spike.ts",
+    "spike:probe": "bun scripts/spike.ts --probe"
+  }
+}

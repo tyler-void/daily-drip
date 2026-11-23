@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Cookie file and wishlist: edited on the machine that runs the bot
+config/
+
 # State: holds the rotated cookie jar
 data/
 
