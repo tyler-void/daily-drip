@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildCatalogEntries, type Catalog, loadCatalog, saveCatalog, TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
+import { buildCatalogEntries, type Catalog, CATALOG_SCHEMA, loadCatalog, saveCatalog, TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
 import { REAUTH_URL, UnexpectedResponseError } from "../src/riot/auth.ts";
 import { BadClaimsError, MaintenanceError } from "../src/riot/store.ts";
 import { buildSnapshot, fetchShop, type ShopDeps, snapshotHash } from "../src/shop.ts";
@@ -40,7 +40,7 @@ describe("snapshotHash", () => {
   });
 });
 
-const catalog = (): Catalog => ({ gameVersion: GAME_VERSION, fetchedAt: "2026-11-01T00:00:00.000Z", ...buildCatalogEntries(weaponsData, tiersData), prices: null });
+const catalog = (): Catalog => ({ schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "2026-11-01T00:00:00.000Z", ...buildCatalogEntries(weaponsData, tiersData), prices: null });
 
 describe("buildSnapshot", () => {
   const now = MIDNIGHT - 3_600_000;

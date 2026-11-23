@@ -12,6 +12,7 @@ After every shop reset, a Discord bot on `home-server` fetches the owner's 4 dai
 - Wishlist: when a wishlisted skin appears, send an extra message that pings the owner.
 - When the cookie dies, notify exactly once with instructions to replace it.
 - `/shop` slash command: shows the current shop on demand, from the cached snapshot.
+- `/wishlist add | remove | list | clear`: manage the wishlist from Discord. `add` picks a gun, then one of its current skins, both with autocomplete.
 
 **After MVP**
 
@@ -137,10 +138,11 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 - the rotated cookie jar, plus a hash of the cookie-file contents it came from;
 - `puuid` and `shard`;
 - `snapshot`: the latest `ShopSnapshot`, which `/shop` answers from;
+- `wishlist`: the entries managed with `/wishlist`;
 - `lastSentHash` and `lastSuccessAt`;
 - the alert flags `cookieDeadNotified`, `blockedNotified` and `deadManNotified`. A successful run clears all three; a new cookie file also clears `cookieDeadNotified`.
 
-**`data/catalog.json`** (mode 0644; nothing secret): the skin catalog from E8 and E9, plus E7 prices if they are ever needed, for one game version. It is about 0.6 MB and changes only after a game patch, so it is kept out of `state.json`, which is rewritten on every cookie rotation.
+**`data/catalog.json`** (mode 0644; nothing secret; versioned by a `schema` number, and fetched again when the number changes): the skin catalog from E8 and E9, with each skin's weapon, plus E7 prices if they are ever needed, for one game version. It is about 0.6 MB and changes only after a game patch, so it is kept out of `state.json`, which is rewritten on every cookie rotation.
 
 **Rules**
 
@@ -176,7 +178,11 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 - No command accepts a cookie: pasting one into Discord would store it on Discord's servers.
 - Phone push: in the Discord app, set the channel's notifications to All Messages.
 
-**Wishlist:** `config/wishlist.json` next to the cookie file, re-read on every run, so editing it needs no restart or rebuild. It holds a list of skin names or UUIDs. Names match `displayName` case-insensitively; a substring match is fine ("Reaver" matches every Reaver skin).
+**Wishlist:** managed with `/wishlist` and kept in `state.json`, because `config/` is mounted read-only on the server. If a `config/wishlist.json` (a JSON array of strings) exists on the first start, it is imported once. Entries are skin names, parts of one, or UUIDs; names match `displayName` case-insensitively as substrings ("Reaver" matches every Reaver skin). At most 25 entries, each 2 to 64 characters, so `/wishlist list` stays under Discord's 2000-character limit.
+
+- `/wishlist add weapon skin`: `weapon` autocompletes "Any weapon" plus every gun in the catalog (E8 `displayName`; knives are "Melee"). `skin` then autocompletes that gun's current store skins (those with a content tier). A gun with a part of a name that only one of its skins has is stored as that skin's full name; an ambiguous part is refused with a hint. With "Any weapon", the typed text is offered first and stored as it is, so a partial name matches every gun.
+- `/wishlist remove entry` autocompletes the current entries; `list` marks entries that are in today's shop; `clear` empties it.
+- Replies are ephemeral. Saving takes the run lock, so the reply is deferred first.
 
 Put every channel behind `interface Notifier { sendShop(snapshot, wishlistHits); sendAlert(text) }` so Telegram or ntfy can be added later without touching the core. Slash commands are Discord-only and live outside the interface.
 
@@ -219,7 +225,7 @@ daily-drip/
     notify/discord.ts  discord.js client, startup check, message layouts
     commands.ts        /shop, owner check, registration
     lock.ts            run lock: scheduled runs and /shop never overlap
-    wishlist.ts        config/wishlist.json, matching
+    wishlist.ts        entries, matching, one-time import of config/wishlist.json
     scheduler.ts       arm from expiresAt, retry timer, dead-man switch
     main.ts
   test/                bun test; fixtures with tokens scrubbed
@@ -261,6 +267,7 @@ The MVP is done when every box below is ticked on `home-server`, with the real a
 - [ ] Spike: from `home-server`, E1 returns 303 with an `access_token`.
 - [ ] One run posts a Discord message with 4 embeds whose names, images and VP prices match the in-game shop (checked by hand once), and it arrives as a push on the phone.
 - [ ] `/shop` from the owner shows the current shop without calling Riot; from another account it is refused.
+- [ ] `/wishlist add` with a gun suggests only that gun's skins; the entry survives a restart and pings when the skin is in the shop.
 - [ ] Restarting the container the same day sends nothing new.
 - [ ] After the next reset, the new shop arrives within 5 minutes without manual action.
 - [ ] A run that fails at reset time (network unplugged) is retried, and the shop arrives the same day once the network is back.

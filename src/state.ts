@@ -14,6 +14,8 @@ export interface State {
   shard: string | null;
   /** The latest shop; `/shop` answers from it while it has not expired. */
   snapshot: ShopSnapshot | null;
+  /** Managed with /wishlist. null until set: then config/wishlist.json is imported once. */
+  wishlist: string[] | null;
   lastSentHash: string | null;
   lastSuccessAt: string | null;
   flags: {
@@ -33,6 +35,7 @@ export function emptyState(): State {
     puuid: null,
     shard: null,
     snapshot: null,
+    wishlist: null,
     lastSentHash: null,
     lastSuccessAt: null,
     flags: { cookieDeadNotified: false, blockedNotified: false, deadManNotified: false },

@@ -2,6 +2,7 @@
 // (skipped if this exact shop was already sent), then stays up to answer /shop.
 // Step 5 adds the timers (next reset, retries, dead-man switch); step 6 the alerts.
 
+import { loadCatalog, storeSkins } from "./catalog.ts";
 import { listenForCommands, registerCommands } from "./commands.ts";
 import { loadConfig } from "./config.ts";
 import { createHttp, NetworkError } from "./http.ts";
@@ -12,13 +13,20 @@ import { CloudflareBlockedError, CookieDeadError, RateLimitedError, UnexpectedRe
 import { BadClaimsError, MaintenanceError } from "./riot/store.ts";
 import { fetchShop, type ShopDeps } from "./shop.ts";
 import { loadState, saveState } from "./state.ts";
-import { loadWishlist, matchWishlist, wishlistPath } from "./wishlist.ts";
+import { ensureWishlist, matchWishlist, wishlistPath } from "./wishlist.ts";
 
 const config = loadConfig();
 addSecret(config.DISCORD_TOKEN);
 
 const state = await loadState();
+if (await ensureWishlist(state, wishlistPath(config.RIOT_COOKIE_FILE))) await saveState(state);
 const withLock = createLock();
+
+// Store skins for /wishlist autocomplete; reloaded after each run, since a run may refresh the catalog.
+let skinList = storeSkins(await loadCatalog());
+const reloadSkinList = async () => {
+  skinList = storeSkins(await loadCatalog());
+};
 const shopDeps: ShopDeps = {
   http: createHttp(),
   state,
@@ -45,7 +53,19 @@ listenForCommands(client, {
   ownerId: config.DISCORD_OWNER_ID,
   cookieFile: config.RIOT_COOKIE_FILE,
   currentSnapshot: () => state.snapshot,
-  runShop: () => withLock(() => fetchShop(shopDeps)),
+  runShop: () =>
+    withLock(async () => {
+      const snapshot = await fetchShop(shopDeps);
+      await reloadSkinList();
+      return snapshot;
+    }),
+  getWishlist: () => state.wishlist ?? [],
+  setWishlist: (entries) =>
+    withLock(async () => {
+      state.wishlist = entries;
+      await saveState(state);
+    }),
+  storeSkins: () => skinList,
 });
 const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
 
@@ -53,11 +73,12 @@ const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config
 async function postShop(): Promise<void> {
   await withLock(async () => {
     const snapshot = await fetchShop(shopDeps);
+    await reloadSkinList();
     if (snapshot.hash === state.lastSentHash) {
       log.info("this shop was already sent; nothing to post");
       return;
     }
-    const hits = matchWishlist(snapshot.offers, await loadWishlist(wishlistPath(config.RIOT_COOKIE_FILE)));
+    const hits = matchWishlist(snapshot.offers, state.wishlist ?? []);
     await notifier.sendShop(snapshot, hits);
     // Spec: lastSentHash is written only after Discord accepts the message.
     state.lastSentHash = snapshot.hash;

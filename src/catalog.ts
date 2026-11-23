@@ -13,6 +13,8 @@ export const VERSION_URL = "https://valorant-api.com/v1/version";
 export const WEAPONS_URL = "https://valorant-api.com/v1/weapons";
 export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
+/** Bump when the cached shape changes, so an older catalog.json is fetched again. */
+export const CATALOG_SCHEMA = 2;
 
 export interface GameVersion {
   version: string;
@@ -22,8 +24,16 @@ export interface GameVersion {
 
 export interface CatalogSkin {
   name: string;
+  /** The gun's name, e.g. "Vandal"; "Melee" for knives. */
+  weapon: string;
   icon: string | null;
   tier: string | null;
+}
+
+/** A store skin for /wishlist autocomplete. */
+export interface StoreSkin {
+  name: string;
+  weapon: string;
 }
 
 export interface CatalogTier {
@@ -33,6 +43,7 @@ export interface CatalogTier {
 }
 
 export interface Catalog {
+  schema: number;
   gameVersion: GameVersion;
   fetchedAt: string;
   /** Keyed by skin-level UUID: the storefront's offer IDs are level UUIDs. */
@@ -67,6 +78,7 @@ export async function resolveGameVersion(http: Http, cached: Catalog | null): Pr
 export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Catalog, "skins" | "tiers"> {
   const skins: Record<string, CatalogSkin> = {};
   for (const weapon of asArray(weapons)) {
+    const weaponName = text(field(weapon, "displayName")) ?? "Unknown";
     for (const skin of asArray(field(weapon, "skins"))) {
       const name = text(field(skin, "displayName"));
       if (!name) continue;
@@ -75,7 +87,7 @@ export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Cata
       const skinIcon = text(field(skin, "displayIcon")) ?? text(field(firstChroma, "fullRender"));
       for (const level of asArray(field(skin, "levels"))) {
         const uuid = text(field(level, "uuid"));
-        if (uuid) skins[uuid] = { name, icon: text(field(level, "displayIcon")) ?? skinIcon, tier };
+        if (uuid) skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier };
       }
     }
   }
@@ -87,6 +99,16 @@ export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Cata
     if (uuid && name) tierTable[uuid] = { name, color: color ? color.slice(0, 6) : "ffffff" };
   }
   return { skins, tiers: tierTable };
+}
+
+/** Every store skin (one with a content tier) once, sorted by name, for /wishlist autocomplete. */
+export function storeSkins(catalog: Catalog | null): StoreSkin[] {
+  if (!catalog) return [];
+  const byName = new Map<string, StoreSkin>();
+  for (const skin of Object.values(catalog.skins)) {
+    if (skin.tier !== null && !byName.has(skin.name)) byName.set(skin.name, { name: skin.name, weapon: skin.weapon });
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function loadCatalog(path = DEFAULT_CATALOG_FILE): Promise<Catalog | null> {
@@ -112,13 +134,20 @@ export async function refreshCatalog(
   cached: Catalog | null,
   path = DEFAULT_CATALOG_FILE,
 ): Promise<Catalog | null> {
-  if (cached && cached.gameVersion.version === gameVersion.version && Object.keys(cached.skins).length > 0) return cached;
+  const usable = cached?.schema === CATALOG_SCHEMA && Object.keys(cached.skins).length > 0;
+  if (usable && cached.gameVersion.version === gameVersion.version) return cached;
   try {
     const [weapons, tiers] = await Promise.all([
       getJson(http, WEAPONS_URL, "E8 weapons", 30_000),
       getJson(http, TIERS_URL, "E9 content tiers"),
     ]);
-    const catalog: Catalog = { gameVersion, fetchedAt: new Date().toISOString(), ...buildCatalogEntries(weapons.data, tiers.data), prices: null };
+    const catalog: Catalog = {
+      schema: CATALOG_SCHEMA,
+      gameVersion,
+      fetchedAt: new Date().toISOString(),
+      ...buildCatalogEntries(weapons.data, tiers.data),
+      prices: null,
+    };
     await saveCatalog(catalog, path);
     log.info("catalog refreshed", { version: gameVersion.version, skins: Object.keys(catalog.skins).length });
     return catalog;

@@ -6,9 +6,11 @@ import { join } from "node:path";
 import {
   buildCatalogEntries,
   type Catalog,
+  CATALOG_SCHEMA,
   loadCatalog,
   refreshCatalog,
   resolveGameVersion,
+  storeSkins,
   TIERS_URL,
   VERSION_URL,
   WEAPONS_URL,
@@ -18,8 +20,8 @@ import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL
 describe("buildCatalogEntries", () => {
   const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData);
 
-  test("indexes every skin level by UUID, with the skin's name and tier", () => {
-    expect(skins[LEVEL_VANDAL]).toEqual({ name: "Imperium Vandal", icon: "https://media.example/vandal-level1.png", tier: TIER_EXCLUSIVE });
+  test("indexes every skin level by UUID, with the skin's name, weapon and tier", () => {
+    expect(skins[LEVEL_VANDAL]).toEqual({ name: "Imperium Vandal", weapon: "Vandal", icon: "https://media.example/vandal-level1.png", tier: TIER_EXCLUSIVE });
     expect(skins[LEVEL_VANDAL_2]?.name).toBe("Imperium Vandal");
   });
 
@@ -38,6 +40,16 @@ describe("buildCatalogEntries", () => {
   });
 });
 
+test("storeSkins lists each store skin once with its weapon, and leaves out tierless ones", () => {
+  const catalog: Catalog = { schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "", ...buildCatalogEntries(weaponsData, tiersData), prices: null };
+  expect(storeSkins(catalog)).toEqual([
+    { name: "Araxys Bulldog", weapon: "Bulldog" },
+    { name: "Celestial Judge", weapon: "Judge" },
+    { name: "Imperium Vandal", weapon: "Vandal" },
+  ]);
+  expect(storeSkins(null)).toEqual([]);
+});
+
 let dir: string;
 let catalogFile: string;
 beforeEach(async () => {
@@ -49,6 +61,7 @@ afterEach(async () => {
 });
 
 const cachedCatalog = (version = GAME_VERSION): Catalog => ({
+  schema: CATALOG_SCHEMA,
   gameVersion: version,
   fetchedAt: "2026-11-01T00:00:00.000Z",
   ...buildCatalogEntries(weaponsData, tiersData),
@@ -76,6 +89,14 @@ describe("refreshCatalog", () => {
     expect(catalog?.gameVersion.version).toBe("13.11.00.1");
     expect(catalog?.prices).toBeNull();
     expect((await loadCatalog(catalogFile))?.gameVersion.version).toBe("13.11.00.1");
+  });
+
+  test("a cache from an older schema is fetched again, even for the same game version", async () => {
+    const { http, urls } = fakeHttp(catalogRoutes);
+    const old = { ...cachedCatalog(), schema: 1 };
+    const catalog = await refreshCatalog(http, GAME_VERSION, old, catalogFile);
+    expect(urls()).toContain(WEAPONS_URL);
+    expect(catalog?.schema).toBe(CATALOG_SCHEMA);
   });
 
   test("keeps the stale cache when valorant-api.com is down", async () => {
