@@ -130,7 +130,7 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 | `TZ` | No | An IANA time zone name; log timestamps only (Discord shows reset times in each viewer's own time zone) |
 | `HEALTHCHECK_URL` | No | Ping URL from an external monitor (e.g. healthchecks.io), called after each successful run |
 
-**Inviting the bot:** Developer Portal → OAuth2 → URL Generator, scopes `bot` and `applications.commands`, permissions View Channel, Send Messages and Embed Links. Open the URL and add the bot to the private server.
+**Inviting the bot:** Developer Portal → OAuth2 → URL Generator, scopes `bot` and `applications.commands`, permissions View Channel, Send Messages and Embed Links. Open the URL and add the bot to the private server. At startup the bot checks that it is in `DISCORD_GUILD_ID` and can post in `DISCORD_CHANNEL_ID`; if not, it logs what is wrong, with the invite link (scopes and permission value `19456` filled in), and exits.
 
 **`data/state.json`** (Docker volume, mode 0600, atomic write via temp file + rename) holds:
 
@@ -216,9 +216,11 @@ daily-drip/
     files.ts           atomic writes (temp file + rename)
     state.ts           data/state.json, chmod 600
     notify/notifier.ts Notifier interface
-    notify/discord.ts  discord.js client, embeds
+    notify/discord.ts  discord.js client, startup check, message layouts
     commands.ts        /shop, owner check, registration
-    scheduler.ts       arm from expiresAt, dead-man switch, run lock
+    lock.ts            run lock: scheduled runs and /shop never overlap
+    wishlist.ts        config/wishlist.json, matching
+    scheduler.ts       arm from expiresAt, retry timer, dead-man switch
     main.ts
   test/                bun test; fixtures with tokens scrubbed
   config/              local only, gitignored: riot-cookie, wishlist.json
@@ -233,8 +235,8 @@ daily-drip/
 1. Spike (`scripts/spike.ts`): run E5, E1 → E4, then E6 once under Bun with a real cookie and print the 4 skins. Run it on the dev PC first, then on `home-server`; `--probe` checks Cloudflare alone, without a cookie. This settles the TLS question, and with it Bun vs Node, before anything else is built.
 2. Auth + state with cookie rotation. The first run imports the spike's rotated cookies (`data/spike-jar.json`, renamed to `.imported`). From then on the bot owns the cookie, and the spike refuses a real-cookie run (`--probe` still works).
 3. Store + catalog + prices → `ShopSnapshot`.
-4. Discord bot: notifier, then `/shop`.
-5. Scheduler, dedup, dead-man switch.
+4. Discord bot: notifier, then `/shop`, the wishlist, and dedup (`lastSentHash`), so restarts during development post nothing new.
+5. Scheduler: next-reset timer, retry timer, dead-man switch, cookie-file polling.
 6. Error-handling table, then Docker.
 
 **Development on Windows:** the dev PC runs the bot directly with Bun, which runs natively on Windows. It needs neither Docker, WSL, the game nor the Riot Client. Docker runs only on `home-server`, where Portainer builds the image from the GitHub repo; the image is Linux either way.
@@ -278,7 +280,7 @@ The main risk is that Riot changes these internal endpoints without notice, as i
 | --- | --- | --- |
 | Cookie lifetime | No source gives a number | Log the date each cookie dies |
 | Bun's TLS from `home-server` | Passed from the dev PC (below) | Spike on `home-server`; fallback in Endpoints, TLS |
-| discord.js on Bun | Expected to work; not tested here | Build step 4 |
+| discord.js on Bun | Works on the dev PC (discord.js 14.28.1, Bun 1.3.14): login, guild command registration, embeds, `/shop` | Check again in the container on `home-server` |
 
 **Verified by the spike on the dev PC** (2026-11-23, Bun 1.3.14, real cookie)
 

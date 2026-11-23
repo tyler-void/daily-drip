@@ -3,9 +3,12 @@
 import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+let writes = 0;
+
 export async function writeFileAtomic(path: string, contents: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
+  // A unique temp name, so two writes to the same file can never share one.
+  const tmp = `${path}.${process.pid}-${++writes}.tmp`;
   await writeFile(tmp, contents, { mode });
   await chmod(tmp, mode).catch(() => {}); // does nothing on Windows
   await renameWithRetry(tmp, path);

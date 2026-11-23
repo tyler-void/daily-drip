@@ -121,7 +121,10 @@ export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   const fallbackPrices = await pricesIfMissing(deps, storefront, catalog, session, gameVersion.riotClientVersion, catalogFile);
   const snapshot = buildSnapshot(storefront, catalog, fallbackPrices);
 
+  // A successful run clears every alert flag (spec: Storage & secrets).
   state.snapshot = snapshot;
+  state.lastSuccessAt = snapshot.fetchedAt;
+  state.flags = { cookieDeadNotified: false, blockedNotified: false, deadManNotified: false };
   await deps.save(state);
   return snapshot;
 }
