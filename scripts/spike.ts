@@ -12,6 +12,7 @@
 
 import { mkdir, readFile, rename, writeFile, chmod } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 
 const COOKIE_FILE = process.env.RIOT_COOKIE_FILE ?? "config/riot-cookie";
 const JAR_FILE = "data/spike-jar.json";
@@ -75,7 +76,7 @@ const serialize = (jar: Jar) => Object.entries(jar).map(([k, v]) => `${k}=${v}`)
 function mergeSetCookies(jar: Jar, setCookies: string[]): Jar {
   const next = { ...jar };
   for (const line of setCookies) {
-    const pair = line.split(";")[0];
+    const pair = line.split(";")[0] ?? "";
     const i = pair.indexOf("=");
     if (i > 0) next[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
   }
@@ -120,6 +121,12 @@ const ua = uaMode === "riotclient"
   ? `RiotClient/${version.riotClientBuild} rso-auth (Windows;10;;Professional, x64)`
   : UA_SHOOTERGAME;
 log("E1 User-Agent", ua);
+
+// Once the bot has run (build step 2), it owns the newest rotated cookies in data/state.json.
+// The spike would start from an older jar and split the rotation, so it stops here.
+if (!probe && existsSync("data/state.json")) {
+  fail(9, "data/state.json exists: the bot now owns the cookie. Use `bun src/main.ts`; `--probe` still works.");
+}
 
 const loaded = probe ? null : await loadJar();
 if (loaded) log("cookie jar", `${Object.keys(loaded.jar).length} cookies from ${loaded.from}`);
@@ -228,7 +235,7 @@ const priceOf = (uuid: string) => storeOffers.find((o) => o.OfferID === uuid)?.C
 console.log("\nToday's shop:");
 for (const uuid of offers) {
   const level = await request(`https://valorant-api.com/v1/weapons/skinlevels/${uuid}`);
-  const name = level.ok ? (await level.json()).data.displayName : `(unknown ${uuid})`;
+  const name = level.ok ? ((await level.json()) as any).data.displayName : `(unknown ${uuid})`;
   const vp = priceOf(uuid);
   console.log(`  ${String(name).padEnd(40)} ${vp ? `${vp} VP` : "price not in E6"}`);
 }

@@ -126,6 +126,7 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 | `DISCORD_CHANNEL_ID` | Yes | Right-click the channel the bot posts in → Copy Channel ID |
 | `DISCORD_OWNER_ID` | Yes | Right-click your own name → Copy User ID. Used for pings and to lock `/shop` |
 | `RIOT_SHARD` | No | Only if E4 misbehaves; e.g. `ap` |
+| `LOG_LEVEL` | No | `debug`, `info` (default), `warn` or `error`. `debug` logs each request's host, path, status and time, never its headers |
 | `TZ` | No | An IANA time zone name; log timestamps only (Discord shows reset times in each viewer's own time zone) |
 | `HEALTHCHECK_URL` | No | Ping URL from an external monitor (e.g. healthchecks.io), called after each successful run |
 
@@ -203,7 +204,8 @@ daily-drip/
   scripts/spike.ts     build step 1; runs on Bun and on Node 24
   src/
     config.ts          env parsing + validation (zod)
-    http.ts            HTTPS client: TLS options, no auto-redirect, redacting logger
+    http.ts            HTTPS client: base headers, no auto-redirect, timeouts
+    log.ts             redacting logger
     cookies.ts         Set-Cookie merge, header serialisation
     riot/auth.ts       E1-E4
     riot/store.ts      E6, E7
@@ -225,7 +227,7 @@ daily-drip/
 **Build order**
 
 1. Spike (`scripts/spike.ts`): run E5, E1 → E4, then E6 once under Bun with a real cookie and print the 4 skins. Run it on the dev PC first, then on `home-server`; `--probe` checks Cloudflare alone, without a cookie. This settles the TLS question, and with it Bun vs Node, before anything else is built.
-2. Auth + state with cookie rotation.
+2. Auth + state with cookie rotation. The first run imports the spike's rotated cookies (`data/spike-jar.json`, renamed to `.imported`). From then on the bot owns the cookie, and the spike refuses a real-cookie run (`--probe` still works).
 3. Store + catalog + prices → `ShopSnapshot`.
 4. Discord bot: notifier, then `/shop`.
 5. Scheduler, dedup, dead-man switch.
