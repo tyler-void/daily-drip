@@ -1,0 +1,158 @@
+// Game version (E5) and the skin catalog (E8, E9) from valorant-api.com (spec: Data mapping).
+// The catalog is cached in data/catalog.json per game version. It is kept apart from
+// state.json because it is about 0.5 MB and changes only after a game patch, while
+// state.json is rewritten on every cookie rotation.
+
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "./files.ts";
+import { type Http, NetworkError } from "./http.ts";
+import { log } from "./log.ts";
+import { UnexpectedResponseError } from "./riot/auth.ts";
+
+export const VERSION_URL = "https://valorant-api.com/v1/version";
+export const WEAPONS_URL = "https://valorant-api.com/v1/weapons";
+export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
+export const DEFAULT_CATALOG_FILE = "data/catalog.json";
+
+export interface GameVersion {
+  version: string;
+  riotClientVersion: string;
+  riotClientBuild: string;
+}
+
+export interface CatalogSkin {
+  name: string;
+  icon: string | null;
+  tier: string | null;
+}
+
+export interface CatalogTier {
+  name: string;
+  /** "rrggbb", from highlightColor without its alpha. */
+  color: string;
+}
+
+export interface Catalog {
+  gameVersion: GameVersion;
+  fetchedAt: string;
+  /** Keyed by skin-level UUID: the storefront's offer IDs are level UUIDs. */
+  skins: Record<string, CatalogSkin>;
+  tiers: Record<string, CatalogTier>;
+  /** E7 prices (offer ID -> VP), only filled if the storefront ever stops carrying prices. */
+  prices: Record<string, number> | null;
+}
+
+export async function fetchGameVersion(http: Http): Promise<GameVersion> {
+  const body = await getJson(http, VERSION_URL, "E5 version");
+  const data = (body.data ?? {}) as Record<string, unknown>;
+  const { version, riotClientVersion, riotClientBuild } = data;
+  if (typeof version !== "string" || typeof riotClientVersion !== "string" || typeof riotClientBuild !== "string") {
+    throw new UnexpectedResponseError("E5 version: missing version fields");
+  }
+  return { version, riotClientVersion, riotClientBuild };
+}
+
+/** E5, or the cached catalog's version while valorant-api.com is down. */
+export async function resolveGameVersion(http: Http, cached: Catalog | null): Promise<GameVersion> {
+  try {
+    return await fetchGameVersion(http);
+  } catch (err) {
+    if (!isThirdPartyOutage(err) || !cached) throw err;
+    log.warn("valorant-api.com is unavailable; using the cached game version", { version: cached.gameVersion.version, error: err });
+    return cached.gameVersion;
+  }
+}
+
+/** Turn E8 (weapons) and E9 (content tiers) into the lookup tables the snapshot needs. */
+export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Catalog, "skins" | "tiers"> {
+  const skins: Record<string, CatalogSkin> = {};
+  for (const weapon of asArray(weapons)) {
+    for (const skin of asArray(field(weapon, "skins"))) {
+      const name = text(field(skin, "displayName"));
+      if (!name) continue;
+      const tier = text(field(skin, "contentTierUuid"));
+      const firstChroma = asArray(field(skin, "chromas"))[0];
+      const skinIcon = text(field(skin, "displayIcon")) ?? text(field(firstChroma, "fullRender"));
+      for (const level of asArray(field(skin, "levels"))) {
+        const uuid = text(field(level, "uuid"));
+        if (uuid) skins[uuid] = { name, icon: text(field(level, "displayIcon")) ?? skinIcon, tier };
+      }
+    }
+  }
+  const tierTable: Record<string, CatalogTier> = {};
+  for (const tier of asArray(tiers)) {
+    const uuid = text(field(tier, "uuid"));
+    const name = text(field(tier, "devName")) ?? text(field(tier, "displayName"));
+    const color = text(field(tier, "highlightColor"));
+    if (uuid && name) tierTable[uuid] = { name, color: color ? color.slice(0, 6) : "ffffff" };
+  }
+  return { skins, tiers: tierTable };
+}
+
+export async function loadCatalog(path = DEFAULT_CATALOG_FILE): Promise<Catalog | null> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as Catalog;
+  } catch {
+    return null; // missing or unreadable: it is only a cache
+  }
+}
+
+export async function saveCatalog(catalog: Catalog, path = DEFAULT_CATALOG_FILE): Promise<void> {
+  await writeFileAtomic(path, JSON.stringify(catalog), 0o644);
+}
+
+/**
+ * The catalog for this game version: the cache when it matches, otherwise E8 + E9.
+ * If valorant-api.com is down, the stale cache (or null) is returned: the shop still
+ * goes out, and unknown items show their UUID (spec: Error handling).
+ */
+export async function refreshCatalog(
+  http: Http,
+  gameVersion: GameVersion,
+  cached: Catalog | null,
+  path = DEFAULT_CATALOG_FILE,
+): Promise<Catalog | null> {
+  if (cached && cached.gameVersion.version === gameVersion.version && Object.keys(cached.skins).length > 0) return cached;
+  try {
+    const [weapons, tiers] = await Promise.all([
+      getJson(http, WEAPONS_URL, "E8 weapons", 30_000),
+      getJson(http, TIERS_URL, "E9 content tiers"),
+    ]);
+    const catalog: Catalog = { gameVersion, fetchedAt: new Date().toISOString(), ...buildCatalogEntries(weapons.data, tiers.data), prices: null };
+    await saveCatalog(catalog, path);
+    log.info("catalog refreshed", { version: gameVersion.version, skins: Object.keys(catalog.skins).length });
+    return catalog;
+  } catch (err) {
+    if (!isThirdPartyOutage(err)) throw err;
+    log.warn("valorant-api.com is unavailable; using the cached catalog", { cachedVersion: cached?.gameVersion.version ?? null, error: err });
+    return cached;
+  }
+}
+
+async function getJson(http: Http, url: string, what: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+  const res = await http.request(url, { timeoutMs });
+  if (!res.ok) throw new UnexpectedResponseError(`${what} returned ${res.status}`);
+  try {
+    const body: unknown = await res.json();
+    if (typeof body === "object" && body !== null) return body as Record<string, unknown>;
+  } catch {
+    // fall through
+  }
+  throw new UnexpectedResponseError(`${what} returned a body that is not a JSON object`);
+}
+
+function isThirdPartyOutage(err: unknown): boolean {
+  return err instanceof NetworkError || err instanceof UnexpectedResponseError;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function field(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}

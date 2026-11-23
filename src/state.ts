@@ -1,9 +1,10 @@
 // data/state.json (spec: Storage & secrets). Mode 0600, written atomically via temp file + rename.
 
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile, rename } from "node:fs/promises";
 import type { CookieJar } from "./cookies.ts";
+import { errorCode, writeFileAtomic } from "./files.ts";
 import { log } from "./log.ts";
+import type { ShopSnapshot } from "./shop.ts";
 
 export interface State {
   version: 1;
@@ -11,6 +12,8 @@ export interface State {
   cookie: { jar: CookieJar; sourceHash: string } | null;
   puuid: string | null;
   shard: string | null;
+  /** The latest shop; `/shop` answers from it while it has not expired. */
+  snapshot: ShopSnapshot | null;
   lastSentHash: string | null;
   lastSuccessAt: string | null;
   flags: {
@@ -29,6 +32,7 @@ export function emptyState(): State {
     cookie: null,
     puuid: null,
     shard: null,
+    snapshot: null,
     lastSentHash: null,
     lastSuccessAt: null,
     flags: { cookieDeadNotified: false, blockedNotified: false, deadManNotified: false },
@@ -57,11 +61,7 @@ export async function loadState(path = DEFAULT_STATE_FILE): Promise<State> {
 }
 
 export async function saveState(state: State, path = DEFAULT_STATE_FILE): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  await writeFile(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
-  await chmod(tmp, 0o600).catch(() => {}); // does nothing on Windows
-  await renameWithRetry(tmp, path);
+  await writeFileAtomic(path, JSON.stringify(state, null, 2), 0o600);
 }
 
 /**
@@ -81,23 +81,4 @@ export async function importSpikeJar(state: State, sourceHash: string, spikePath
   state.cookie = { jar: saved.jar as CookieJar, sourceHash };
   await rename(spikePath, `${spikePath}.imported`);
   return true;
-}
-
-// On Windows, replacing a file that an antivirus scanner or the indexer has open
-// fails briefly with EPERM, EBUSY or EACCES.
-async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(from, to);
-      return;
-    } catch (err) {
-      const retryable = ["EPERM", "EBUSY", "EACCES"].includes(errorCode(err) ?? "");
-      if (!retryable || attempt >= attempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
-    }
-  }
-}
-
-function errorCode(err: unknown): string | undefined {
-  return typeof err === "object" && err !== null && "code" in err ? String(err.code) : undefined;
 }

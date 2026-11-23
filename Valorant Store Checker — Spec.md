@@ -106,7 +106,7 @@ The storefront returns UUIDs and prices; names and images come from valorant-api
 | Night Market (after MVP) | `BonusStore.BonusStoreOffers[]`: `Offer.Cost[VP]`, `DiscountCosts[VP]`, `DiscountPercent`; `BonusStoreRemainingDurationInSeconds` | `BonusStore` is present only while Night Market is open |
 | Accessories (after MVP) | `AccessoryStore.AccessoryStoreOffers[].Offer.Cost["85ca954a-41f2-ce94-9b45-8ca3dd39a00d"]` | That key is Kingdom Credits |
 
-**Internal model:** `ShopSnapshot { fetchedAt, expiresAt, offers: [{ levelUuid, name, iconUrl, vp, tier }], hash }`. `hash` = sha256 of the sorted offer UUIDs + `expiresAt` rounded to the nearest 10 minutes; it deduplicates notifications. `expiresAt` comes from a remaining-seconds count, so it moves by a second or so between fetches; without the rounding, a restart would resend the same shop.
+**Internal model:** `ShopSnapshot { fetchedAt, expiresAt, offers: [{ levelUuid, name, iconUrl, vp, tier: { name, color } | null }], hash }`. `hash` = sha256 of the sorted offer UUIDs + `expiresAt` rounded to the nearest 10 minutes; it deduplicates notifications. `expiresAt` comes from a remaining-seconds count, so it moves by a second or so between fetches; without the rounding, a restart would resend the same shop.
 
 Verified 2026-11-23: the v3 response carries per-offer prices in `SingleItemStoreOffers[].Cost`, so the daily shop needs no E7 call. Its top-level keys were `FeaturedBundle`, `SkinsPanelLayout`, `UpgradeCurrencyStore`, `AccessoryStore` and `PluginStores`; `BonusStore` was absent, as expected while Night Market is closed.
 
@@ -136,9 +136,11 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 
 - the rotated cookie jar, plus a hash of the cookie-file contents it came from;
 - `puuid` and `shard`;
-- the catalog and price caches, with their game version;
+- `snapshot`: the latest `ShopSnapshot`, which `/shop` answers from;
 - `lastSentHash` and `lastSuccessAt`;
 - the alert flags `cookieDeadNotified`, `blockedNotified` and `deadManNotified`. A successful run clears all three; a new cookie file also clears `cookieDeadNotified`.
+
+**`data/catalog.json`** (mode 0644; nothing secret): the skin catalog from E8 and E9, plus E7 prices if they are ever needed, for one game version. It is about 0.6 MB and changes only after a game patch, so it is kept out of `state.json`, which is rewritten on every cookie rotation.
 
 **Rules**
 
@@ -209,8 +211,10 @@ daily-drip/
     cookies.ts         Set-Cookie merge, header serialisation
     riot/auth.ts       E1-E4
     riot/store.ts      E6, E7
-    catalog.ts         E5, E8, E9 + caches
-    state.ts           data/state.json, atomic write, chmod 600
+    catalog.ts         E5, E8, E9; cache in data/catalog.json
+    shop.ts            one run: auth → E6 → catalog → ShopSnapshot; the retry-once rules
+    files.ts           atomic writes (temp file + rename)
+    state.ts           data/state.json, chmod 600
     notify/notifier.ts Notifier interface
     notify/discord.ts  discord.js client, embeds
     commands.ts        /shop, owner check, registration
@@ -283,6 +287,7 @@ The main risk is that Riot changes these internal endpoints without notice, as i
 - E4 returned `ap`.
 - E6 v3 carries the prices (Data mapping), so E7 is not needed.
 - The daily shop resets at 00:00 UTC.
+- Two fetches a second apart computed `expiresAt` as 00:00:00.340 and 23:59:59.505 UTC. Without the 10-minute rounding, the dedup hash would have changed between them.
 
 **Risks**
 

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashCookieFile } from "../src/cookies.ts";
-import type { Http, RequestOptions } from "../src/http.ts";
+import type { Http } from "../src/http.ts";
 import {
   authenticate,
   classifyReauth,
@@ -21,14 +21,7 @@ import {
   type AuthDeps,
 } from "../src/riot/auth.ts";
 import { emptyState, type State } from "../src/state.ts";
-
-const OK_LOCATION = "https://playvalorant.com/opt_in#access_token=AT&scope=account+openid&iss=x&id_token=IT&token_type=Bearer&expires_in=3600";
-
-function headers(init: Record<string, string>, setCookies: string[] = []): Headers {
-  const h = new Headers(init);
-  for (const line of setCookies) h.append("set-cookie", line);
-  return h;
-}
+import { fakeRiot, headers, OK_LOCATION } from "./fakes.ts";
 
 describe("classifyReauth", () => {
   test("303 with tokens in the fragment is ok", () => {
@@ -81,33 +74,6 @@ test("regionToShard maps latam and br to na", () => {
 });
 
 // ---------- authenticate() against a fake Riot ----------
-
-interface Call {
-  url: string;
-  options: RequestOptions;
-}
-
-type Route = (options: RequestOptions) => Response;
-
-function fakeRiot(overrides: Record<string, Route> = {}) {
-  const calls: Call[] = [];
-  const routes: Record<string, Route> = {
-    [REAUTH_URL]: () => new Response(null, { status: 303, headers: headers({ location: OK_LOCATION }, ["ssid=rotated; Path=/", "ccid=new; Path=/"]) }),
-    [ENTITLEMENTS_URL]: () => Response.json({ entitlements_token: "ENT" }),
-    [USERINFO_URL]: () => Response.json({ sub: "puuid-1234-5678" }),
-    [PAS_URL]: () => Response.json({ affinities: { live: "ap" } }),
-    ...overrides,
-  };
-  const http: Http = {
-    async request(url, options = {}) {
-      calls.push({ url, options });
-      const route = routes[url];
-      if (!route) throw new Error(`unexpected request to ${url}`);
-      return route(options);
-    },
-  };
-  return { http, calls };
-}
 
 let dir: string;
 let cookieFile: string;
