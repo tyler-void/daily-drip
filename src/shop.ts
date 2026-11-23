@@ -15,6 +15,7 @@ import {
 import { log } from "./log.ts";
 import { type AuthDeps, authenticate, type Session, UnexpectedResponseError } from "./riot/auth.ts";
 import { BadClaimsError, fetchOfferPrices, fetchStorefront, type Storefront } from "./riot/store.ts";
+import { noAlerts } from "./state.ts";
 
 export interface ShopOffer {
   levelUuid: string;
@@ -124,7 +125,7 @@ export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   // A successful run clears every alert flag (spec: Storage & secrets).
   state.snapshot = snapshot;
   state.lastSuccessAt = snapshot.fetchedAt;
-  state.flags = { cookieDeadNotified: false, blockedNotified: false, deadManNotified: false };
+  state.flags = noAlerts();
   await deps.save(state);
   return snapshot;
 }

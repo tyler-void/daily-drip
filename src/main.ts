@@ -1,36 +1,38 @@
-// Entry point. Build step 4: the Discord bot. On start it runs once and posts the shop
-// (skipped if this exact shop was already sent), then stays up to answer /shop.
-// Step 5 adds the timers (next reset, retries, dead-man switch); step 6 the alerts.
+// Entry point: the Discord bot plus the scheduler.
+// Runs once at start, then after every shop reset; answers /shop and /wishlist in between.
 
 import { loadCatalog, storeSkins } from "./catalog.ts";
 import { listenForCommands, registerCommands } from "./commands.ts";
 import { loadConfig } from "./config.ts";
-import { createHttp, NetworkError } from "./http.ts";
+import { createHttp } from "./http.ts";
 import { createLock } from "./lock.ts";
 import { addSecret, log } from "./log.ts";
 import { checkDiscordSetup, createDiscordNotifier, DiscordSetupError, startDiscord } from "./notify/discord.ts";
-import { CloudflareBlockedError, CookieDeadError, RateLimitedError, UnexpectedResponseError } from "./riot/auth.ts";
-import { BadClaimsError, MaintenanceError } from "./riot/store.ts";
+import { postShop } from "./post.ts";
+import { createScheduler } from "./scheduler.ts";
 import { fetchShop, type ShopDeps } from "./shop.ts";
 import { loadState, saveState } from "./state.ts";
-import { ensureWishlist, matchWishlist, wishlistPath } from "./wishlist.ts";
+import { ensureWishlist, wishlistPath } from "./wishlist.ts";
 
 const config = loadConfig();
 addSecret(config.DISCORD_TOKEN);
+addSecret(config.HEALTHCHECK_URL); // its path is the check's secret key
 
 const state = await loadState();
 if (await ensureWishlist(state, wishlistPath(config.RIOT_COOKIE_FILE))) await saveState(state);
 const withLock = createLock();
+const save = (s: typeof state) => saveState(s);
 
 // Store skins for /wishlist autocomplete; reloaded after each run, since a run may refresh the catalog.
 let skinList = storeSkins(await loadCatalog());
 const reloadSkinList = async () => {
   skinList = storeSkins(await loadCatalog());
 };
+
 const shopDeps: ShopDeps = {
   http: createHttp(),
   state,
-  save: (s) => saveState(s),
+  save,
   cookieFile: config.RIOT_COOKIE_FILE,
   shardOverride: config.RIOT_SHARD,
 };
@@ -49,6 +51,9 @@ try {
   await client.destroy();
   process.exit(1);
 }
+
+const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
+
 listenForCommands(client, {
   ownerId: config.DISCORD_OWNER_ID,
   cookieFile: config.RIOT_COOKIE_FILE,
@@ -67,41 +72,29 @@ listenForCommands(client, {
     }),
   storeSkins: () => skinList,
 });
-const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
 
-/** One scheduled run: fetch, then post unless this exact shop was already sent. All of it under the run lock. */
-async function postShop(): Promise<void> {
-  await withLock(async () => {
-    const snapshot = await fetchShop(shopDeps);
-    await reloadSkinList();
-    if (snapshot.hash === state.lastSentHash) {
-      log.info("this shop was already sent; nothing to post");
-      return;
-    }
-    const hits = matchWishlist(snapshot.offers, state.wishlist ?? []);
-    await notifier.sendShop(snapshot, hits);
-    // Spec: lastSentHash is written only after Discord accepts the message.
-    state.lastSentHash = snapshot.hash;
-    await saveState(state);
-    log.info("shop posted", { offers: snapshot.offers.map((o) => o.name), wishlistHits: hits.map((h) => h.name) });
-  });
-}
-
-try {
-  await postShop();
-} catch (err) {
-  if (err instanceof CookieDeadError) log.error(`cookie dead: ${err.message}. Put a fresh cookie header in ${config.RIOT_COOKIE_FILE}.`);
-  else if (err instanceof CloudflareBlockedError) log.error(`blocked: ${err.message}. See the TLS fallback in the spec (Endpoints, TLS).`);
-  else if (err instanceof MaintenanceError || err instanceof BadClaimsError || err instanceof RateLimitedError) log.error(err.message);
-  else if (err instanceof NetworkError || err instanceof UnexpectedResponseError) log.error(`run failed: ${err.message}`);
-  else log.error("run failed", { error: err });
-}
-log.info("listening for /shop; press Ctrl+C to stop");
+const healthcheckUrl = config.HEALTHCHECK_URL;
+const scheduler = createScheduler({
+  state,
+  save,
+  run: () => postShop({ state, save, withLock, fetchShop: () => fetchShop(shopDeps), notifier, afterFetch: reloadSkinList }),
+  notifier,
+  cookieFile: config.RIOT_COOKIE_FILE,
+  heartbeat: healthcheckUrl
+    ? async () => {
+        const res = await fetch(healthcheckUrl, { signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) throw new Error(`healthcheck answered ${res.status}`);
+      }
+    : undefined,
+});
+scheduler.start();
+log.info("running; press Ctrl+C to stop");
 
 // Docker stops containers with SIGTERM; close the gateway connection cleanly.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log.info(`${signal}: shutting down`);
+    scheduler.stop();
     void client.destroy().finally(() => process.exit(0));
   });
 }

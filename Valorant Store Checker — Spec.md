@@ -140,7 +140,7 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 - `snapshot`: the latest `ShopSnapshot`, which `/shop` answers from;
 - `wishlist`: the entries managed with `/wishlist`;
 - `lastSentHash` and `lastSuccessAt`;
-- the alert flags `cookieDeadNotified`, `blockedNotified` and `deadManNotified`. A successful run clears all three; a new cookie file also clears `cookieDeadNotified`.
+- the alert flags `cookieDeadNotified`, `blockedNotified`, `badClaimsNotified` and `deadManNotified`. A successful run clears all four; a new cookie file also clears `cookieDeadNotified`.
 
 **`data/catalog.json`** (mode 0644; nothing secret; versioned by a `schema` number, and fetched again when the number changes): the skin catalog from E8 and E9, with each skin's weapon, plus E7 prices if they are ever needed, for one game version. It is about 0.6 MB and changes only after a game patch, so it is kept out of `state.json`, which is rewritten on every cookie rotation.
 
@@ -153,14 +153,15 @@ Variables come from `.env` on the dev PC (Bun loads it) and from the Portainer s
 
 ## Schedule & notifications
 
-The process is long-running and re-arms itself from the shop's own expiry. There is no cron and no hardcoded reset time, which is the same approach as Storefront.
+The process is long-running and re-arms itself from the shop's own expiry. There is no cron and no hardcoded reset time, which is the same approach as Storefront. Instead of one long timer, a tick every minute compares the wall clock with the next run time: long timers stop counting while a machine sleeps and fire late, while a tick catches up within a minute of waking.
 
 1. On start: run once immediately.
-2. After a successful run: arm a timer for `expiresAt + 90 s`.
+2. After a successful run: arm a timer for `expiresAt + 90 s`, and at least a minute ahead, so an already-expired answer cannot cause a tight loop.
 3. After a failed run: arm a retry timer with the delay from the Error handling table (default 30 min). Keep retrying at that pace until a run succeeds; only a dead cookie stops retries.
 4. If the new snapshot's `hash` equals `lastSentHash`, send nothing; a restart must not resend.
 5. Dead-man switch: if `lastSuccessAt` is more than 26 h ago, send one warning (`deadManNotified`). Skip it while `cookieDeadNotified` is set: that alert already went out.
-6. After each successful run, call `HEALTHCHECK_URL` if it is set. The external monitor alerts when the pings stop, which covers what the in-process switch cannot: the container or the machine being down.
+6. After each successful run, call `HEALTHCHECK_URL` if it is set. The external monitor alerts when the pings stop, which covers what the in-process switch cannot: the container or the machine being down. On healthchecks.io, set the check's period to 1 day and its grace time to 2 hours.
+7. An alert's flag is set only once the alert has been sent; one that fails to send goes out on the next failure. Alert texts pass through the redacting logger's `redact()` first.
 
 **Messages (Discord)**, all in `DISCORD_CHANNEL_ID`:
 
@@ -195,11 +196,11 @@ Every failure ends in a bounded retry or a single alert, never a tight loop. Det
 | E1 `Location` is the login page (`authenticate.riotgames.com/login`, or a relative `/login`) | Cookie dead: password change, "sign out of all devices", 2FA change, or Riot flagged the session | Alert once (`cookieDeadNotified`); stop calling auth until the cookie file changes |
 | E1 403 with `x-frame-options: SAMEORIGIN`, or no `Set-Cookie`, or no token in the fragment | Cloudflare blocking the IP or the TLS fingerprint | Alert once (`blockedNotified`), retry every 1 h; if it persists from the home IP, switch the TLS client (Endpoints, TLS) |
 | 429 on any Riot host | Rate limit | Honour `Retry-After`; default retry after 1 h |
-| E6 400 with `errorCode: BAD_CLAIMS` | Token rejected. Tokens are minutes old, so a header or shard problem is likelier than the cookie | Reauth once and retry; if it fails again, alert once and end as a failed run. Never treat it as cookie dead |
+| E6 400 with `errorCode: BAD_CLAIMS` | Token rejected. Tokens are minutes old, so a header or shard problem is likelier than the cookie | Reauth once and retry; if it fails again, alert once (`badClaimsNotified`) and end as a failed run. Never treat it as cookie dead |
 | E6 403 with `errorCode: SCHEDULED_DOWNTIME` (SkinPeek's `isMaintenance`) | Riot maintenance | Skip; retry in 30 min |
 | E6 fails right after a game patch | Stale `X-Riot-ClientVersion` | Refetch E5, retry once |
 | valorant-api.com down | Third-party outage | Send the shop from the cached catalog; uncached items show UUID + price. An embed whose image fails to load still posts, without the image |
-| Discord send fails | Discord outage or network | discord.js waits out 429s itself; retry other errors 3 times with backoff. `lastSentHash` stays unchanged, so the shop is resent on the next attempt |
+| Discord send fails | Discord outage or network | discord.js waits out 429s itself; retry other errors 3 times, after 5, 15 and 45 s. Then the run fails; `lastSentHash` stays unchanged, so the next attempt resends the shop |
 
 Within one run, the "retry once" rows retry at most 3 times in total. A run that still fails ends as a failed run, and the scheduler's retry timer takes over (Schedule, step 3).
 
@@ -219,6 +220,8 @@ daily-drip/
     riot/store.ts      E6, E7
     catalog.ts         E5, E8, E9; cache in data/catalog.json
     shop.ts            one run: auth → E6 → catalog → ShopSnapshot; the retry-once rules
+    post.ts            one scheduled run: fetch, dedup, wishlist, send with retries
+    alerts.ts          alert texts
     files.ts           atomic writes (temp file + rename)
     state.ts           data/state.json, chmod 600
     notify/notifier.ts Notifier interface
@@ -226,7 +229,7 @@ daily-drip/
     commands.ts        /shop, owner check, registration
     lock.ts            run lock: scheduled runs and /shop never overlap
     wishlist.ts        entries, matching, one-time import of config/wishlist.json
-    scheduler.ts       arm from expiresAt, retry timer, dead-man switch
+    scheduler.ts       one-minute tick: next run, retry timer, alerts, dead-man switch, cookie-file polling
     main.ts
   test/                bun test; fixtures with tokens scrubbed
   config/              local only, gitignored: riot-cookie, wishlist.json
@@ -242,8 +245,8 @@ daily-drip/
 2. Auth + state with cookie rotation. The first run imports the spike's rotated cookies (`data/spike-jar.json`, renamed to `.imported`). From then on the bot owns the cookie, and the spike refuses a real-cookie run (`--probe` still works).
 3. Store + catalog + prices → `ShopSnapshot`.
 4. Discord bot: notifier, then `/shop`, the wishlist, and dedup (`lastSentHash`), so restarts during development post nothing new.
-5. Scheduler: next-reset timer, retry timer, dead-man switch, cookie-file polling.
-6. Error-handling table, then Docker.
+5. Scheduler: next-reset timer, retry timer, dead-man switch, cookie-file polling, and the error table's delays and one-time alerts (the scheduler cannot pick a retry time without them).
+6. Docker and deploy.
 
 **Development on Windows:** the dev PC runs the bot directly with Bun, which runs natively on Windows. It needs neither Docker, WSL, the game nor the Riot Client. Docker runs only on `home-server`, where Portainer builds the image from the GitHub repo; the image is Linux either way.
 

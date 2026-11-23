@@ -10,7 +10,6 @@ import {
   PermissionFlagsBits,
   PermissionsBitField,
 } from "discord.js";
-import { REAUTH_URL } from "../riot/auth.ts";
 import type { ShopOffer, ShopSnapshot } from "../shop.ts";
 import type { Notifier } from "./notifier.ts";
 
@@ -44,19 +43,6 @@ export function wishlistMessage(hits: ShopOffer[], ownerId: string): DiscordMess
 
 export function alertMessage(text: string, ownerId: string): DiscordMessage {
   return { content: `<@${ownerId}> ${text}`, embeds: [], allowedMentions: { users: [ownerId] } };
-}
-
-/** The steps to replace a dead cookie (spec: Auth flow, manual step). */
-export function cookieDeadText(cookieFile: string): string {
-  return [
-    "**Riot cookie expired.** The shop can't be fetched until it is replaced:",
-    "1. In an Edge InPrivate window, sign in at https://auth.riotgames.com.",
-    "2. Press F12 → Network (tick Preserve log, filter All), then open this link in the same tab:",
-    `<${REAUTH_URL}>`,
-    "3. Click the first `authorize` request → Request Headers → right-click `cookie` → Copy value.",
-    `4. On the bot's machine, overwrite the cookie file (\`${cookieFile}\` as the bot sees it) with that value. No restart needed.`,
-    "5. Close the window without signing out.",
-  ].join("\n");
 }
 
 /** The permissions the spec's invite step grants (spec: Inviting the bot). */

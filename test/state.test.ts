@@ -40,7 +40,7 @@ test("older state files get the missing fields filled in", async () => {
   const state = await loadState(path);
   expect(state.shard).toBe("ap");
   expect(state.cookie).toBeNull();
-  expect(state.flags).toEqual({ cookieDeadNotified: false, blockedNotified: true, deadManNotified: false });
+  expect(state.flags).toEqual({ cookieDeadNotified: false, blockedNotified: true, badClaimsNotified: false, deadManNotified: false });
 });
 
 test("a corrupt state file is moved aside and the state starts empty", async () => {

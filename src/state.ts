@@ -18,12 +18,18 @@ export interface State {
   wishlist: string[] | null;
   lastSentHash: string | null;
   lastSuccessAt: string | null;
-  flags: {
-    cookieDeadNotified: boolean;
-    blockedNotified: boolean;
-    deadManNotified: boolean;
-  };
+  /** One per alert, so each is sent once; a successful run clears them all. */
+  flags: AlertFlags;
 }
+
+export interface AlertFlags {
+  cookieDeadNotified: boolean;
+  blockedNotified: boolean;
+  badClaimsNotified: boolean;
+  deadManNotified: boolean;
+}
+
+export const noAlerts = (): AlertFlags => ({ cookieDeadNotified: false, blockedNotified: false, badClaimsNotified: false, deadManNotified: false });
 
 export const DEFAULT_STATE_FILE = "data/state.json";
 export const SPIKE_JAR_FILE = "data/spike-jar.json";
@@ -38,7 +44,7 @@ export function emptyState(): State {
     wishlist: null,
     lastSentHash: null,
     lastSuccessAt: null,
-    flags: { cookieDeadNotified: false, blockedNotified: false, deadManNotified: false },
+    flags: noAlerts(),
   };
 }
 

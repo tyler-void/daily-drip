@@ -3,9 +3,10 @@
 // /wishlist add|remove|list|clear manages the wishlist; add picks a gun, then one of its current skins.
 
 import { type Client, Events, MessageFlags, SlashCommandBuilder } from "discord.js";
+import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
 import { log, redact } from "./log.ts";
-import { cookieDeadText, type DiscordMessage, shopMessage } from "./notify/discord.ts";
+import { type DiscordMessage, shopMessage } from "./notify/discord.ts";
 import { CookieDeadError } from "./riot/auth.ts";
 import type { ShopSnapshot } from "./shop.ts";
 import { addEntry, MAX_ENTRIES, MAX_ENTRY_LENGTH, matchWishlist, removeEntry, suggest } from "./wishlist.ts";

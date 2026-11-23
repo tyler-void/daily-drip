@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { alertMessage, cookieDeadText, inviteUrl, shopMessage, wishlistMessage } from "../src/notify/discord.ts";
+import { cookieDeadText } from "../src/alerts.ts";
+import { alertMessage, inviteUrl, shopMessage, wishlistMessage } from "../src/notify/discord.ts";
 import type { ShopSnapshot } from "../src/shop.ts";
 
 const OWNER = "123456789012345678";
