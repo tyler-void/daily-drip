@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/avatar.png" width="180" alt="The bot's avatar: a pour-over coffee dripper on a stand, dripping four drops of paint in blue, teal, pink and orange into a cup">
+</p>
+
 # daily-drip
 
 A Discord bot that posts your daily Valorant shop to a private channel after every reset: the 4 skins with their images, VP prices and tier, and a countdown to the next reset. It pings you when a skin on your wishlist shows up.
@@ -55,6 +59,8 @@ To replace the cookie later, overwrite `config/riot-cookie`; the bot notices wit
 ## Credits
 
 The auth and store flow follows [SkinPeek](https://github.com/giorgi-o/SkinPeek) (archived) and [Storefront](https://github.com/exoflex6/Storefront). Game data comes from [valorant-api.com](https://valorant-api.com).
+
+The avatar, [`assets/avatar.png`](./assets/avatar.png), was generated with Google Gemini. Its four drops are in four of the game's skin tier colours, one per skin in the daily shop. Use it for your own copy of the bot if you like.
 
 ## Disclaimer
 
