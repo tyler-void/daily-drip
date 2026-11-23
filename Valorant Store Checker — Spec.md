@@ -246,7 +246,7 @@ daily-drip/
 3. Store + catalog + prices → `ShopSnapshot`.
 4. Discord bot: notifier, then `/shop`, the wishlist, and dedup (`lastSentHash`), so restarts during development post nothing new.
 5. Scheduler: next-reset timer, retry timer, dead-man switch, cookie-file polling, and the error table's delays and one-time alerts (the scheduler cannot pick a retry time without them).
-6. Docker and deploy.
+6. Docker and deploy: handed off in `docs/step-6-deploy.md`.
 
 **Development on Windows:** the dev PC runs the bot directly with Bun, which runs natively on Windows. It needs neither Docker, WSL, the game nor the Riot Client. Docker runs only on `home-server`, where Portainer builds the image from the GitHub repo; the image is Linux either way.
 
