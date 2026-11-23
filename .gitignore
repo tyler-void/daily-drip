@@ -1,0 +1,9 @@
+# Secrets: the Riot cookie and bot tokens live only on the machine that runs the bot
+.env
+.env.*
+!.env.example
+
+# State: holds the rotated cookie jar
+data/
+
+node_modules/
