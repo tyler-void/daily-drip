@@ -32,11 +32,17 @@ healthchecks.io: one check, period 1 day, grace 2 hours, ping URL in `HEALTHCHEC
 - The locked-down container starts, writes `state.json` (mode 600, uid 1000) to a fresh volume, and stops with a clear message on a bad Discord token.
 - **Cloudflare, from `home-server`, in the container image, without a cookie:** `scripts/spike.ts --probe` ended with "PROBE OK" (303 to the login page). Bun's TLS gets through from the server too.
 
+## First start, 2026-11-23
+
+- The container logged in to Riot from `home-server` on its first run, refreshed the catalog, posted the shop and scheduled the next run for 90 s after the next reset.
+- A `docker restart` the same day logged "this shop was already sent; nothing to post".
+- Secret scan: `docker logs daily-drip 2>&1 | grep -nE 'ssid=[^[]|Bearer [^[]|eyJ'` printed nothing, and the bot token does not appear in the logs.
+
 ## Acceptance still open (spec: Acceptance criteria, on `home-server`)
 
-1. Start the stack. The logs should show "connected to Discord", then "shop posted" (or "already sent"), then "next run scheduled" for about 90 s after the next reset.
-2. Work through the spec's checklist: `/shop`, `/wishlist`, a restart posts nothing new, the automatic post after the next reset, still working on day 3.
-3. Secret scan: `docker logs daily-drip 2>&1 | grep -nE 'ssid=[^[]|Bearer [^[]|eyJ'` must print nothing.
+1. `/shop` from another account is refused; a `/wishlist` entry survives a restart and pings when its skin is in the shop.
+2. The automatic post after the next reset, a failed run at reset time being retried, and still working on day 3.
+3. Run the secret scan above once more at the end.
 4. **The broken-cookie test goes last.** Changing one character in the cookie file makes the bot replace its saved session with the broken one, so the working session is gone afterwards. Expect exactly one "cookie expired" ping and no retry loop. Then a fresh cookie goes into the file and the bot recovers within about a minute.
 
 ## Things learned in steps 1–5 (also in the spec)

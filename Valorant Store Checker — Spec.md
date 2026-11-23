@@ -267,18 +267,18 @@ Deploy from the dev machine with `DEPLOY_HOST=<server> scripts/deploy.sh`: it co
 
 The MVP is done when every box below is ticked on `home-server`, with the real account.
 
-- [ ] Spike: from `home-server`, E1 returns 303 with an `access_token`.
-- [ ] One run posts a Discord message with 4 embeds whose names, images and VP prices match the in-game shop (checked by hand once), and it arrives as a push on the phone.
+- [x] Spike: from `home-server`, E1 returns 303 with an `access_token`.
+- [x] One run posts a Discord message with 4 embeds whose names, images and VP prices match the in-game shop (checked by hand once), and it arrives as a push on the phone.
 - [ ] `/shop` from the owner shows the current shop without calling Riot; from another account it is refused.
 - [ ] `/wishlist add` with a gun suggests only that gun's skins; the entry survives a restart and pings when the skin is in the shop.
-- [ ] Restarting the container the same day sends nothing new.
+- [x] Restarting the container the same day sends nothing new.
 - [ ] After the next reset, the new shop arrives within 5 minutes without manual action.
 - [ ] A run that fails at reset time (network unplugged) is retried, and the shop arrives the same day once the network is back.
 - [ ] The rotated cookie is written to state, and the service still works on day 3 without anyone touching it.
 - [ ] A broken cookie (one character changed) produces exactly one "cookie dead" message, no retry loop, and no dead-man warning a day later.
 - [ ] Overwriting the cookie file with a good cookie recovers within 2 minutes, without a restart.
-- [ ] `docker logs` contains no `ssid=`, no ` Bearer  `, no `eyJ` and no Discord bot token.
-- [ ] Unit tests cover fragment parsing, `Set-Cookie` merge, offer → snapshot mapping, hash dedup (including a 1-second shift in `expiresAt`), the retry timer and the error table's branches (fixture responses).
+- [x] `docker logs` contains no `ssid=`, no ` Bearer  `, no `eyJ` and no Discord bot token.
+- [x] Unit tests cover fragment parsing, `Set-Cookie` merge, offer → snapshot mapping, hash dedup (including a 1-second shift in `expiresAt`), the retry timer and the error table's branches (fixture responses).
 
 ## Risks, unknowns & sources
 
