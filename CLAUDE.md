@@ -2,7 +2,7 @@
 
 Discord bot that posts the owner's daily Valorant shop after each reset. The spec, `Valorant Store Checker — Spec.md`, is the source of truth: read it first, and update it when behaviour changes.
 
-**Current task:** `docs/step-6-deploy.md` (Docker and deploy on `home-server`).
+**Current task:** the open acceptance checks in `docs/step-6-deploy.md`, run on `home-server`.
 Never change the repo's visibility without the owner's explicit OK.
 
 - **Runtime:** Bun 1.3.14, TypeScript run directly. Erasable syntax only (`erasableSyntaxOnly`, `.ts` import extensions), so falling back to Node stays cheap; Bun-specific APIs go only in `src/http.ts`.
