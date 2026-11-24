@@ -73,7 +73,7 @@ test("one line per tracked player, highest ACS first, with RR once known and …
   expect(message.embeds[0]?.description).toBe(
     "**Tyler**  Jett  20/14/5  ACS 268  HS 24%  ADR 162  +21 RR → Gold 2 (45)\n**friend1**  Sova  20/14/5  ACS 201  HS 24%  ADR 162  RR …",
   );
-  expect(message.allowedMentions).toEqual({ parse: [] });
+  expect(message.allowedMentions).toEqual({ users: [] });
 });
 
 test("RR given up on, or a lost one, shows correctly", () => {
@@ -109,4 +109,24 @@ test("HenrikDev's map name is used when there is one; queue names", () => {
   expect(queueName("ggteam")).toBe("Escalation");
   expect(queueName("newqueue")).toBe("Newqueue");
   expect(queueName("")).toBe("Custom");
+});
+
+test("tracked players mapped to Discord users are mentioned on their line and pinged in the text; nobody else", () => {
+  const message = recapMessage({
+    recap: recap(),
+    tracked: ["p-tyler", "p-friend"],
+    rr: {},
+    names,
+    discordIds: { "p-tyler": "100000000000000001", "p-friend": "200000000000000002", "p-rando": "999999999999999999" },
+  });
+  expect(message.content).toBe("<@100000000000000001> <@200000000000000002>");
+  expect(message.allowedMentions).toEqual({ users: ["100000000000000001", "200000000000000002"] });
+  expect(message.embeds[0]?.description).toStartWith("<@100000000000000001> · **Tyler**  Jett");
+  expect(message.embeds[0]?.description).toContain("<@200000000000000002> · **friend1**  Sova");
+});
+
+test("without a mapping, nobody is pinged", () => {
+  const message = recapMessage({ recap: recap(), tracked: ["p-tyler"], rr: {}, names });
+  expect(message.content).toBe("");
+  expect(message.allowedMentions).toEqual({ users: [] });
 });

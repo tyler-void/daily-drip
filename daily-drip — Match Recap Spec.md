@@ -139,7 +139,7 @@ Everyone on the roster put themselves there; the owner can remove people but nev
 
 ## Recap message
 
-One embed per match, in `RECAP_CHANNEL_ID` (falls back to the shop channel). It is posted as soon as the stats are in, then edited once when a late RR change arrives. It pings nobody.
+One embed per match, in `RECAP_CHANNEL_ID` (falls back to the shop channel). It is posted as soon as the stats are in, then edited once when a late RR change arrives. Its text mentions and pings every roster member who played, through the roster's Discord user ↔ PUUID link, and nobody else; each of their lines starts with their Discord mention. The RR edit doesn't ping again (Discord doesn't notify on edits).
 
 ```text
 Victory 13–9 · Ascent · Competitive · 38 min        (green; red on a loss, grey on a draw)

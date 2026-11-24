@@ -62,6 +62,16 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
   /** Match ID -> the recap last posted, to rebuild the message when RR arrives. */
   const recaps = new Map<string, MatchRecap>();
 
+  /** The Discord user of each tracked PUUID, from the roster (the link between the two halves). */
+  function discordIdsOf(puuids: string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const puuid of puuids) {
+      const entry = findByPuuid(deps.recap.roster, puuid);
+      if (entry) out[puuid] = entry.discordUserId;
+    }
+    return out;
+  }
+
   /** Runs `fn` with the entry's pd session; on a stale session, drops it and retries once (spec). */
   async function withPd<T>(entry: RosterEntry, fn: (session: Session) => Promise<T>): Promise<T> {
     const pd = deps.pd as PdApi;
@@ -115,7 +125,7 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
     if (tracked.length === 0) return;
     for (const p of recap.players) if (tracked.includes(p.puuid)) refreshRiotName(roster, p.puuid, p.riotName);
     const rr = await collectRr(recap, tracked, now());
-    const message = recapMessage({ recap, tracked, rr, names: deps.names(), late });
+    const message = recapMessage({ recap, tracked, rr, names: deps.names(), late, discordIds: discordIdsOf(tracked) });
     const messageId = await deps.post(message);
     const posted: PostedMatch = {
       matchId: recap.matchId,
@@ -143,7 +153,7 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
       const rr = await collectRr(recap, posted.tracked, Date.parse(posted.postedAt));
       const stillPending = Object.entries(rr).flatMap(([puuid, state]) => (state === "pending" ? [puuid] : []));
       if (stillPending.length === posted.rrPending.length) continue;
-      await deps.edit(posted.messageId, recapMessage({ recap, tracked: posted.tracked, rr, names: deps.names(), late: posted.late }));
+      await deps.edit(posted.messageId, recapMessage({ recap, tracked: posted.tracked, rr, names: deps.names(), late: posted.late, discordIds: discordIdsOf(posted.tracked) }));
       posted.rrPending = stillPending;
       await deps.save();
     }

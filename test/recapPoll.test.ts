@@ -103,6 +103,9 @@ test("one recap per match for every roster member in it; RR now for one, pending
   expect(d).toContain("RR …");
   expect(x.recap.postedMatches[0]).toMatchObject({ matchId: "m-1", messageId: "msg-1", rrPending: ["p-member"], tracked: ["p-owner", "p-member"], late: false });
   expect(x.recap.lastSeenMatch["p-owner"]).toBe("m-1");
+  // Both are on the roster, so both are mentioned and pinged.
+  expect(x.posts[0]!.content).toBe(`<@${OWNER}> <@${MEMBER}>`);
+  expect(x.posts[0]!.allowedMentions).toEqual({ users: [OWNER, MEMBER] });
 });
 
 test("the member's later poll doesn't post it again, and fills in their RR by editing", async () => {
