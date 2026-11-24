@@ -123,6 +123,8 @@ export async function fetchMemberShop(account: LinkedAccount, deps: MemberDeps):
       member.shard = cache.shard;
       await deps.save();
     }
+    // A changed Riot ID is saved with the snapshot below; it labels their shop post.
+    if (session.riotName) account.riotName = session.riotName;
     return session;
   };
 

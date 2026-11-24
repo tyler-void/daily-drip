@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type AccountRegistry, addMember, ensureOwner, MAX_MEMBERS } from "../src/accounts.ts";
 import { TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
 import { canStartLink, completeLink, fetchMemberShop, type MemberDeps, PASTE_HELP } from "../src/members.ts";
-import { USERINFO_URL } from "../src/riot/auth.ts";
+import { PAS_URL, USERINFO_URL } from "../src/riot/auth.ts";
 import { LoginDeadError, TOKEN_URL } from "../src/riot/login.ts";
 import { importKey, open } from "../src/secretbox.ts";
 import { fakeRiot, LEVEL_JUDGE, LEVEL_VANDAL, PUUID, type Route, STOREFRONT_URL, storefrontBody, tiersData, versionRoute, weaponsData } from "./fakes.ts";
@@ -133,8 +133,9 @@ test("a member's run reaches their shop, and a rotated refresh token is sealed a
   expect(snapshot.offers.map((o) => o.name)).toEqual(["Imperium Vandal", "Celestial Judge"]);
   expect(account.member?.snapshot).toEqual(snapshot);
   expect(await open(KEY, account.member!.sealedRefreshToken)).toBe("rt-2");
-  // The PUUID and shard were cached at link time, so E3 and E4 don't run again.
-  expect(fake.urls()).not.toContain(USERINFO_URL);
+  // The shard was cached at link time, so E4 doesn't run again; E3 does, for the current Riot ID.
+  expect(fake.urls()).not.toContain(PAS_URL);
+  expect(fake.urls()).toContain(USERINFO_URL);
 });
 
 test("a refresh that doesn't rotate leaves the sealed token alone", async () => {
@@ -150,4 +151,12 @@ test("a dead sign-in throws LoginDeadError, so the scheduler can ask the member 
   await completeLink(reg, friend, PASTE, deps(riot().http));
   const dead = riot({ [TOKEN_URL]: tokenRoute({ refreshError: "invalid_grant" }) });
   await expect(fetchMemberShop(reg[FRIEND]!, deps(dead.http))).rejects.toBeInstanceOf(LoginDeadError);
+});
+
+test("a member who changed their Riot ID gets the new one on their next run", async () => {
+  const reg = withOwner();
+  await completeLink(reg, friend, PASTE, deps(riot().http));
+  const renamed = riot({ [USERINFO_URL]: () => Response.json({ sub: PUUID, acct: { game_name: "NewName", tag_line: "0001" } }) });
+  await fetchMemberShop(reg[FRIEND]!, deps(renamed.http));
+  expect(reg[FRIEND]?.riotName).toBe("NewName#0001");
 });

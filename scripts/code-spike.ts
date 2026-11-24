@@ -135,7 +135,7 @@ say("E4 shard", `${e4.status}, ${shard || "none"}`);
 if (!entitlementsToken || !puuid || !shard) await fail(6, "E2, E3 or E4 failed with the refreshed token");
 
 const version = await fetchGameVersion(http);
-const storefront = await fetchStorefront(http, { accessToken, idToken, entitlementsToken, puuid, shard }, version.riotClientVersion);
+const storefront = await fetchStorefront(http, { accessToken, idToken, entitlementsToken, puuid, shard, riotName: null }, version.riotClientVersion);
 say("E6 storefront", `${storefront.offers.length} offers, resets in ${Math.round(storefront.remainingSeconds / 3600)} h`);
 
 console.log("\nCODE SPIKE OK: a sign-in link gives a refresh token that reaches the shop, with no cookie and no Riot Mobile.");

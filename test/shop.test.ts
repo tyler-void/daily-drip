@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCatalogEntries, type Catalog, CATALOG_SCHEMA, loadCatalog, saveCatalog, TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
-import { REAUTH_URL, UnexpectedResponseError } from "../src/riot/auth.ts";
+import { REAUTH_URL, UnexpectedResponseError, USERINFO_URL } from "../src/riot/auth.ts";
 import { BadClaimsError, MaintenanceError } from "../src/riot/store.ts";
 import { buildSnapshot, fetchShop, type ShopDeps, snapshotHash } from "../src/shop.ts";
 import { emptyState, type State } from "../src/state.ts";
@@ -191,4 +191,11 @@ describe("fetchShop", () => {
     const snapshot = await fetchShop(deps(riot.http));
     expect(snapshot.offers[0]?.name).toBe("Imperium Vandal");
   });
+});
+
+test("the owner's run hands each new session to onSession (it carries the Riot ID for the shop post)", async () => {
+  const riot = shopRiot({ [USERINFO_URL]: () => Response.json({ sub: "puuid-1234-5678", acct: { game_name: "Owner", tag_line: "0001" } }) });
+  const seen: Array<string | null> = [];
+  await fetchShop({ ...deps(riot.http), onSession: (session) => void seen.push(session.riotName) });
+  expect(seen).toEqual(["Owner#0001"]);
 });

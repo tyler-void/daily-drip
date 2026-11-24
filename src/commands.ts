@@ -116,6 +116,8 @@ export interface CommandDeps {
   /** Current store skins from the catalog, for autocomplete. */
   storeSkins(): StoreSkin[];
   members?: MemberCommands;
+  /** A Discord user's linked Riot ID, shown on their shop; null while unknown. */
+  riotName?: (userId: string) => string | null;
   now?: () => number;
 }
 
@@ -144,7 +146,7 @@ export async function handleShopCommand(interaction: CommandInteraction, deps: C
     return;
   }
   // Everyone's shop is public, like the daily post; the reply names whose it is, without a ping.
-  const holder = { userId: interaction.user.id, ping: false };
+  const holder = { userId: interaction.user.id, ping: false, riotName: deps.riotName?.(interaction.user.id) ?? null };
   const cached = liveSnapshot(shop, deps);
   if (cached) {
     await interaction.reply(shopMessage(cached, holder));

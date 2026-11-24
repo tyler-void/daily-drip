@@ -42,6 +42,11 @@ const shopDeps: ShopDeps = {
   save,
   cookieFile: config.RIOT_COOKIE_FILE,
   shardOverride: config.RIOT_SHARD,
+  // Keep the owner's Riot ID current for their shop post; saved with the run's snapshot.
+  onSession: (session) => {
+    const owner = state.accounts[config.DISCORD_OWNER_ID];
+    if (owner && session.riotName) owner.riotName = session.riotName;
+  },
 };
 
 // Members (spec: Accounts) only with TOKEN_KEY, which seals their refresh tokens at rest.
@@ -72,14 +77,15 @@ if (ensureOwner(state.accounts, { discordUserId: config.DISCORD_OWNER_ID, discor
 }
 
 // Everyone's shop goes in the channel with a ping; wishlist hits by DM. The owner's alerts stay in the channel.
-const notifier = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID, "channel");
+const riotNameOf = (userId: string) => state.accounts[userId]?.riotName ?? null;
+const notifier = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID, "channel", () => riotNameOf(config.DISCORD_OWNER_ID));
 
 // One notifier per member, kept for the process, so the "allow DMs" note goes out once. A member's alerts go by DM.
 const memberNotifiers = new Map<string, Notifier>();
 const memberNotifier = (userId: string): Notifier => {
   let found = memberNotifiers.get(userId);
   if (!found) {
-    found = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, userId, "dm");
+    found = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, userId, "dm", () => riotNameOf(userId));
     memberNotifiers.set(userId, found);
   }
   return found;
@@ -155,6 +161,7 @@ listenForCommands(client, {
     }),
   storeSkins: () => skinList,
   members: memberCommands,
+  riotName: riotNameOf,
 });
 
 const healthcheckUrl = config.HEALTHCHECK_URL;

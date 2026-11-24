@@ -108,7 +108,7 @@ describe("authenticate", () => {
     const state = emptyState();
     const session = await authenticate(deps(http, state));
 
-    expect(session).toEqual({ accessToken: "AT", idToken: "IT", entitlementsToken: "ENT", puuid: "puuid-1234-5678", shard: "ap" });
+    expect(session).toEqual({ accessToken: "AT", idToken: "IT", entitlementsToken: "ENT", puuid: "puuid-1234-5678", shard: "ap", riotName: null });
     expect(calls.map((c) => c.url)).toEqual([REAUTH_URL, ENTITLEMENTS_URL, USERINFO_URL, PAS_URL]);
     expect(calls[0]?.options.cookie).toBe("ssid=original; clid=c1");
     expect(calls[0]?.options.headers?.["User-Agent"]).toStartWith("ShooterGame/");
@@ -124,14 +124,14 @@ describe("authenticate", () => {
     expect(saved.at(-1)?.cookie?.jar.ssid).toBe("rotated");
   });
 
-  test("a second run reuses the cached PUUID and shard", async () => {
+  test("a second run reuses the cached shard; E3 runs again for the current Riot ID", async () => {
     const first = fakeRiot();
     const state = emptyState();
     await authenticate(deps(first.http, state));
 
     const second = fakeRiot();
     await authenticate(deps(second.http, state));
-    expect(second.calls.map((c) => c.url)).toEqual([REAUTH_URL, ENTITLEMENTS_URL]);
+    expect(second.calls.map((c) => c.url)).toEqual([REAUTH_URL, ENTITLEMENTS_URL, USERINFO_URL]);
     expect(second.calls[0]?.options.cookie).toBe("ssid=rotated; clid=c1; ccid=new");
   });
 

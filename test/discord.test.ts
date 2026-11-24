@@ -76,6 +76,13 @@ describe("shopMessage with a holder", () => {
     expect(message.allowedMentions).toEqual({ users: [FRIEND] });
   });
 
+  test("their Riot ID follows the mention, escaped so it can't change the formatting", () => {
+    expect(shopMessage(snapshot, { userId: FRIEND, ping: true, riotName: "Friend#0001" }).content).toStartWith(
+      `<@${FRIEND}>'s **daily shop** (Friend#0001) · resets <t:`,
+    );
+    expect(shopMessage(snapshot, { userId: FRIEND, ping: true, riotName: "*bold*_x#0001" }).content).toContain("(\\*bold\\*\\_x#0001)");
+  });
+
   test("a /shop reply names them without a ping", () => {
     expect(shopMessage(snapshot, { userId: FRIEND, ping: false }).allowedMentions).toEqual({ parse: [] });
   });
@@ -109,8 +116,9 @@ describe("createPersonNotifier", () => {
 
   test("the shop goes in the channel with a ping; a wishlist hit goes by DM, first", async () => {
     const { client, sent } = fakeClient();
-    await createPersonNotifier(client, CHANNEL, PERSON, "dm").sendShop(snapshot, snapshot.offers.slice(0, 1));
+    await createPersonNotifier(client, CHANNEL, PERSON, "dm", () => "Friend#0001").sendShop(snapshot, snapshot.offers.slice(0, 1));
     expect(sent.map((m) => m.to)).toEqual([`dm:${PERSON}`, `channel:${CHANNEL}`]);
+    expect(sent[1]?.content).toContain("(Friend#0001)");
     expect(sent[0]?.content).toContain("Imperium Vandal");
     expect(sent[1]?.content).toStartWith(`<@${PERSON}>'s **daily shop**`);
     expect(sent[1]?.allowedMentions).toEqual({ users: [PERSON] });

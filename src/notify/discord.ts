@@ -5,6 +5,7 @@ import {
   Client,
   EmbedBuilder,
   Events,
+  escapeMarkdown,
   GatewayIntentBits,
   type MessageMentionOptions,
   PermissionFlagsBits,
@@ -25,6 +26,8 @@ const vp = (amount: number) => `${new Intl.NumberFormat("en-US").format(amount)}
 export interface ShopHolder {
   userId: string;
   ping: boolean;
+  /** Their Riot ID, shown next to the mention; omitted while unknown. */
+  riotName?: string | null;
 }
 
 /**
@@ -43,8 +46,10 @@ export function shopMessage(snapshot: ShopSnapshot, holder?: ShopHolder): Discor
   // <t:…:R> renders as "in 20 hours" in each viewer's own time zone, and keeps counting.
   const countdown = `resets <t:${resetsAt}:R>`;
   if (!holder) return { content: `**Daily shop** · ${countdown}`, embeds, allowedMentions: { parse: [] } };
+  // Escaped, so a Riot ID can't change the message's formatting.
+  const riotId = holder.riotName ? ` (${escapeMarkdown(holder.riotName)})` : "";
   return {
-    content: `<@${holder.userId}>'s **daily shop** · ${countdown}`,
+    content: `<@${holder.userId}>'s **daily shop**${riotId} · ${countdown}`,
     embeds,
     // Without the ping, the mention still shows the name; it just doesn't notify.
     allowedMentions: holder.ping ? { users: [holder.userId] } : { parse: [] },
@@ -120,7 +125,14 @@ export const DM_BLOCKED_NOTE =
  * If someone blocks DMs, one note in the channel (once per process) asks them to allow them. It
  * never names a skin, and the shop is still posted.
  */
-export function createPersonNotifier(client: Client, channelId: string, userId: string, alerts: "channel" | "dm"): Notifier {
+export function createPersonNotifier(
+  client: Client,
+  channelId: string,
+  userId: string,
+  alerts: "channel" | "dm",
+  /** Their current Riot ID, read at send time so a renamed account shows its new name. */
+  riotName: () => string | null = () => null,
+): Notifier {
   let noteSent = false;
 
   async function channel() {
@@ -149,7 +161,7 @@ export function createPersonNotifier(client: Client, channelId: string, userId: 
     async sendShop(snapshot, wishlistHits) {
       // The private hit first: if the public post fails and is retried, a repeated DM is the lesser harm.
       if (wishlistHits.length > 0) await dm(wishlistMessage(wishlistHits, userId));
-      await (await channel()).send(shopMessage(snapshot, { userId, ping: true }));
+      await (await channel()).send(shopMessage(snapshot, { userId, ping: true, riotName: riotName() }));
     },
     async sendAlert(text) {
       if (alerts === "channel") {

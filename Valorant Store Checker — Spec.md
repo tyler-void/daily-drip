@@ -52,7 +52,7 @@ Each run trades a Riot session cookie for a fresh access token; no password is e
    - 403, or no token in the fragment: blocked by Cloudflare; see Error handling.
 3. Merge every `Set-Cookie` from the response into the jar and **persist state immediately** (atomic write). Riot rotates cookies on each reauth; skipping this kills the cookie early.
 4. Get the entitlements token (E2).
-5. Get the PUUID from the `sub` field of userinfo (E3); cache it in state.
+5. Get the PUUID from the `sub` field of userinfo (E3); cache it in state. E3 runs on every run anyway: its `acct.game_name` and `acct.tag_line` give the Riot ID shown on shop posts, which can change.
 6. Get the region from `affinities.live` (E4) and map it to a shard: `latam` and `br` use `na`; any other value is the shard itself (SkinPeek's `userRegion`). Cache it in state. `RIOT_SHARD` overrides it. Code must not assume a particular shard.
 7. Tokens live about 1 hour ([valapidocs](https://techchrism.github.io/valorant-api-docs/common-components.html)). Reauth from scratch on every run; never keep tokens between runs.
 
@@ -66,7 +66,7 @@ The storefront is now **v3, POST with body `{}`**. valapidocs still documents v2
 | --- | --- | --- | --- | --- |
 | E1 | GET | `https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&scope=account%20openid&nonce=1` | `Cookie`, `User-Agent` (below); do not follow redirects | 303; `access_token` + `id_token` in the `Location` fragment; rotated cookies in `Set-Cookie` |
 | E2 | POST | `https://entitlements.auth.riotgames.com/api/token/v1` | `Authorization: Bearer <access_token>`, `Content-Type: application/json` | `entitlements_token` |
-| E3 | GET | `https://auth.riotgames.com/userinfo` | Bearer | `sub` = PUUID |
+| E3 | GET | `https://auth.riotgames.com/userinfo` | Bearer | `sub` = PUUID; `acct.game_name`, `acct.tag_line` = Riot ID |
 | E4 | PUT | `https://riot-geo.pas.si.riotgames.com/pas/v1/product/valorant` | Bearer; body `{"id_token": "<id_token>"}` | `affinities.live` = shard |
 | E5 | GET | `https://valorant-api.com/v1/version` | none | `data.riotClientVersion`, `data.riotClientBuild` |
 | E6 | POST | `https://pd.{shard}.a.pvp.net/store/v3/storefront/{puuid}` | 4 game headers (below); body `{}` | Daily shop, Night Market, Accessory store |
@@ -166,7 +166,7 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 
 **Messages (Discord).** Everyone's shop is public; wishlists are private.
 
-- Daily shop, in `DISCORD_CHANNEL_ID`: one message with 4 embeds per person, the owner and each linked member. Each embed has the skin name as title, the VP price, `displayIcon` as the image and the tier colour (E9) as its colour. The text is `<@person>'s daily shop · resets <t:{expiresAt}:R>`: it names whose shop it is and pings them, and Discord shows the reset as a live countdown.
+- Daily shop, in `DISCORD_CHANNEL_ID`: one message with 4 embeds per person, the owner and each linked member. Each embed has the skin name as title, the VP price, `displayIcon` as the image and the tier colour (E9) as its colour. The text is `<@person>'s daily shop (Name#Tag) · resets <t:{expiresAt}:R>`: it names whose shop it is by Discord mention and Riot ID (escaped, so a Riot ID can't change the formatting; left out while unknown) and pings them, and Discord shows the reset as a live countdown.
 - Wishlist hit: a DM to that person, sent before their shop, naming the skin. A wishlist is private, so hits never go in the channel. If someone blocks DMs from server members, one note in the channel (once per process) asks them to allow them; it names no skin, and the shop is still posted.
 - Cookie dead: one message mentioning the owner, with the steps to grab a new cookie and overwrite the cookie file.
 - `lastSentHash` is written only after Discord accepts the message.

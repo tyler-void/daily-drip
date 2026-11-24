@@ -36,6 +36,8 @@ export interface ShopSnapshot {
 
 export interface ShopDeps extends AuthDeps {
   catalogFile?: string;
+  /** Called with each new session, e.g. to keep the owner's Riot ID for shop posts. */
+  onSession?: (session: Session) => void;
 }
 
 /** Where a shop run gets its session: the owner's cookie, or a member's refresh token. */
@@ -89,7 +91,12 @@ export function buildSnapshot(
 /** The owner's run. Saves the snapshot in state; throws the typed errors the scheduler reacts to. */
 export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   const { state } = deps;
-  const snapshot = await fetchSnapshot({ http: deps.http, catalogFile: deps.catalogFile, session: () => authenticate(deps) });
+  const session = async () => {
+    const fresh = await authenticate(deps);
+    deps.onSession?.(fresh);
+    return fresh;
+  };
+  const snapshot = await fetchSnapshot({ http: deps.http, catalogFile: deps.catalogFile, session });
   // A successful run clears every alert flag (spec: Storage & secrets).
   state.snapshot = snapshot;
   state.lastSuccessAt = snapshot.fetchedAt;

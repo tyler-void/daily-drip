@@ -47,6 +47,8 @@ export interface Session {
   entitlementsToken: string;
   puuid: string;
   shard: string;
+  /** The Riot ID ("gameName#tagLine") from E3, for display on shop posts; null if Riot didn't say. */
+  riotName: string | null;
 }
 
 export interface AuthDeps {
@@ -185,9 +187,9 @@ export interface SessionCache {
 
 /**
  * Auth flow, steps 4-6, for any access and ID token, whether it came from the owner's cookie or a
- * member's refresh token: E2 entitlements every time, then E3 and E4 only when the cache lacks the
- * PUUID or the shard. Fills the cache; the caller saves it when `cacheChanged`. `riotName` is set
- * only when E3 ran.
+ * member's refresh token: E2 and E3 every time, E4 only when the cache lacks the shard. E3 runs
+ * every time because the Riot ID it returns is shown on shop posts and can change; the PUUID from it
+ * is cached once. Fills the cache; the caller saves it when `cacheChanged`.
  */
 export async function completeSession(
   http: Http,
@@ -206,18 +208,17 @@ export async function completeSession(
   addSecret(entitlementsToken);
 
   let cacheChanged = false;
-  let riotName: string | null = null;
+  const e3 = await expectJson(await http.request(USERINFO_URL, { headers: bearer }), "E3 userinfo");
+  const puuid = text(e3.sub);
+  if (!puuid) throw new UnexpectedResponseError("E3 userinfo: no sub (PUUID)");
   if (!cache.puuid) {
-    const e3 = await expectJson(await http.request(USERINFO_URL, { headers: bearer }), "E3 userinfo");
-    const puuid = text(e3.sub);
-    if (!puuid) throw new UnexpectedResponseError("E3 userinfo: no sub (PUUID)");
     cache.puuid = puuid;
     cacheChanged = true;
-    const acct = e3.acct as Record<string, unknown> | undefined;
-    const gameName = text(acct?.game_name);
-    const tagLine = text(acct?.tag_line);
-    if (gameName) riotName = tagLine ? `${gameName}#${tagLine}` : gameName;
   }
+  const acct = e3.acct as Record<string, unknown> | undefined;
+  const gameName = text(acct?.game_name);
+  const tagLine = text(acct?.tag_line);
+  const riotName = gameName ? (tagLine ? `${gameName}#${tagLine}` : gameName) : null;
   let shard = shardOverride ?? cache.shard;
   if (!shard) {
     const e4 = await expectJson(
@@ -232,7 +233,7 @@ export async function completeSession(
     cacheChanged = true;
   }
 
-  return { session: { accessToken, idToken, entitlementsToken, puuid: cache.puuid, shard }, cacheChanged, riotName };
+  return { session: { accessToken, idToken, entitlementsToken, puuid: cache.puuid, shard, riotName }, cacheChanged, riotName };
 }
 
 async function expectJson(res: Response, what: string): Promise<Record<string, unknown>> {

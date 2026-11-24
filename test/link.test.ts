@@ -115,10 +115,10 @@ test("a member's /shop is their own shop, in public, named but without a ping", 
 
 test("the owner's /shop is public too, named the same way", async () => {
   const { interaction: i, events } = interaction(OWNER);
-  await handleShopCommand(i, deps({}));
+  await handleShopCommand(i, { ...deps({}), riotName: (id) => (id === OWNER ? "Owner#0001" : null) });
   expect(events[0]?.options.embeds[0].title).toBe("Owner Skin");
   expect(events[0]?.options.flags).toBeUndefined();
-  expect(events[0]?.options.content).toStartWith(`<@${OWNER}>'s **daily shop**`);
+  expect(events[0]?.options.content).toStartWith(`<@${OWNER}>'s **daily shop** (Owner#0001)`);
 });
 
 test("a member whose sign-in died is told to link again", async () => {
