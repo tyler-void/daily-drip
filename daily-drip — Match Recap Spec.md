@@ -135,6 +135,7 @@ Everyone on the roster put themselves there; the owner can remove people but nev
 - At most 15 followed entries. That is the HenrikDev budget's ceiling at the poll intervals above.
 - `/recap join` explains first, in an ephemeral reply, that their match stats will be posted in the channel. It needs a confirm button.
 - When a linked member unlinks, their recap entry goes with them.
+- **Decided 2026-11-25 (owner):** automatic recaps stay opt-in; linked members join with `/recap on`, and are never added or pinged before that. `/recap show` stays open for anyone's match, linked or not, since it shows the same public match data tracker sites do, and it pings nobody.
 - The Riot ID shown is re-read from E11/H2 on each match, since players rename.
 
 ## Recap message
