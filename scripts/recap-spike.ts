@@ -1,5 +1,8 @@
 // Match recap spikes (daily-drip — Match Recap Spec, Spikes & acceptance). Read-only.
 //
+//   bun scripts/recap-spike.ts henrik S3, HenrikDev, with the owner's own Riot ID (read from
+//                                     state.json, mounted read-only). The key comes from the file
+//                                     HENRIK_KEY_FILE. No Riot session: the bot can keep running.
 //   bun scripts/recap-spike.ts pd     S2 + S4, with the owner's session. Run on the server with the
 //                                     bot stopped until "SESSION READY": signing in rotates the
 //                                     owner's cookie, and the rotated jar is saved to state.json
@@ -44,8 +47,12 @@ async function getJson(url: string, headers: Record<string, string>): Promise<{ 
 }
 
 const mode = process.argv[2];
+if (mode === "henrik") {
+  await henrikSpike();
+  process.exit(0);
+}
 if (mode !== "pd") {
-  console.log("usage: bun scripts/recap-spike.ts pd");
+  console.log("usage: bun scripts/recap-spike.ts pd|henrik");
   process.exit(1);
 }
 
@@ -170,3 +177,86 @@ for (const minute of CHECKS_MIN) {
   say(`S4 at ${minute} min`, `E10 ${r.status}${r.body?.errorCode ? ` ${r.body.errorCode}` : ""}`);
 }
 console.log("SPIKE DONE (E1 ran once in this process)");
+
+// ---------- S3: HenrikDev H1-H3 with the owner's own Riot ID ----------
+
+async function henrikSpike(): Promise<void> {
+  const { readFile } = await import("node:fs/promises");
+  const key = (await readFile(process.env.HENRIK_KEY_FILE ?? "/run/henrik-key", "utf8")).trim();
+  addSecret(key);
+  const saved = JSON.parse(await readFile(STATE_FILE, "utf8")) as Json;
+  const owner = Object.values((saved.accounts ?? {}) as Record<string, Json>).find((a) => a.role === "owner");
+  const riotName: string | undefined = owner?.riotName;
+  const ownerPuuid: string = owner?.puuid ?? saved.puuid ?? "";
+  if (!riotName?.includes("#")) {
+    console.log("S3 FAILED: no owner Riot ID in state.json");
+    return;
+  }
+  const [name, tag] = riotName.split("#") as [string, string];
+  const base = "https://api.henrikdev.xyz";
+  let calls = 0;
+  const henrik = async (path: string) => {
+    calls++;
+    const res = await http.request(base + path, { headers: { Authorization: key, Accept: "application/json" }, timeoutMs: 30_000 });
+    const h = (n: string) => res.headers.get(n) ?? "-";
+    const limits = `limit=${h("x-ratelimit-limit")} remaining=${h("x-ratelimit-remaining")} reset=${h("x-ratelimit-reset")} retry-after=${h("retry-after")}`;
+    let body: Json | null = null;
+    try {
+      body = (await res.json()) as Json;
+    } catch {
+      body = null;
+    }
+    return { status: res.status, limits, body };
+  };
+
+  // H1: Riot ID -> PUUID and region.
+  const h1 = await henrik(`/valorant/v2/account/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`);
+  const acct = h1.body?.data ?? {};
+  say("H1 account", `${h1.status}; ${h1.limits}`);
+  say("  data keys", Object.keys(acct).join(","));
+  say("  same PUUID as the bot's", String(acct.puuid === ownerPuuid));
+  const region: string = acct.region ?? "ap";
+  say("  region", region);
+  if (!acct.puuid) {
+    say("  error", JSON.stringify(h1.body?.errors ?? h1.body).slice(0, 200));
+    return;
+  }
+
+  // H2: newest match with every player's stats; twice, to see what a warm call costs.
+  for (const round of ["cold", "warm"]) {
+    const h2 = await henrik(`/valorant/v4/by-puuid/matches/${region}/pc/${acct.puuid}?size=1`);
+    say(`H2 matches (${round})`, `${h2.status}; ${h2.limits}`);
+    if (round === "warm") break;
+    const match: Json = h2.body?.data?.[0] ?? {};
+    say("  match keys", Object.keys(match).join(","));
+    const meta: Json = match.metadata ?? {};
+    say("  metadata keys", Object.keys(meta).join(","));
+    say("  match / map / queue", `${String(meta.match_id ?? "").slice(0, 8)} / ${meta.map?.name ?? JSON.stringify(meta.map)} / ${meta.queue?.id ?? JSON.stringify(meta.queue)}`);
+    const players: Json[] = match.players ?? [];
+    say("  player keys", Object.keys(players[0] ?? {}).join(","));
+    say("  stats keys", Object.keys(players[0]?.stats ?? {}).join(","));
+    say("  teams[0]", JSON.stringify((match.teams ?? [])[0] ?? null).slice(0, 160));
+    const rounds = Array.isArray(match.rounds) ? match.rounds.length : 0;
+    say("  rounds", rounds);
+    const me = players.find((p) => p.puuid === acct.puuid);
+    if (me) {
+      const st: Json = me.stats ?? {};
+      const shots = (st.headshots ?? 0) + (st.bodyshots ?? 0) + (st.legshots ?? 0);
+      const dealt = typeof st.damage === "object" ? st.damage?.dealt : st.damage;
+      say(
+        "OWNER via HenrikDev",
+        `${me.agent?.name ?? "?"} ${st.kills}/${st.deaths}/${st.assists} ACS ${rounds ? Math.round(st.score / rounds) : "?"} HS ${shots ? Math.round((100 * st.headshots) / shots) : "?"}% ADR ${rounds && dealt !== undefined ? Math.round(dealt / rounds) : "?"} tier=${JSON.stringify(me.tier ?? null).slice(0, 60)}`,
+      );
+    }
+  }
+
+  // H3: RR history.
+  const h3 = await henrik(`/valorant/v2/by-puuid/mmr-history/${region}/pc/${acct.puuid}`);
+  const history: Json[] = h3.body?.data?.history ?? h3.body?.data ?? [];
+  say("H3 mmr history", `${h3.status}; ${h3.limits}`);
+  say("  data keys", Object.keys(h3.body?.data ?? {}).join(","));
+  say("  entries / entry keys", `${Array.isArray(history) ? history.length : "?"} / ${Object.keys((Array.isArray(history) ? history[0] : null) ?? {}).join(",")}`);
+  const first: Json | undefined = Array.isArray(history) ? history[0] : undefined;
+  if (first) say("  newest", `${String(first.match_id ?? "").slice(0, 8)} last_change=${first.last_change} rr=${first.rr} tier=${JSON.stringify(first.tier ?? null).slice(0, 60)}`);
+  say("S3 DONE", `${calls} HenrikDev calls`);
+}

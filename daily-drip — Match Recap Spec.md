@@ -249,7 +249,7 @@ The design rests on five points nobody has checked yet; each has a spike.
 | "Playing VALORANT" spans a whole session, not one match | Inferred | S1 |
 | E11 field names for `teams[]`, map, agent, tier | **Confirmed 2026-11-25 (S2):** `matchInfo.queueID` (capital ID), `mapId`, `isCompleted`, `gameLengthMillis`; `teams[]`: `teamId`, `won`, `roundsWon`, `roundsPlayed`; `players[]`: `subject`, `teamId`, `partyId`, `characterId`, `competitiveTier`, `stats` {`score`, `roundsPlayed`, `kills`, `deaths`, `assists`}; `roundResults[].playerStats[].damage[]`: `receiver`, `damage`, `headshots`, `bodyshots`, `legshots`. E10 `History[]`: `MatchID`, `GameStartTime`, `QueueID`; E12 `Matches[]` has `QueueID` too | S2 |
 | E10 accepts another player's PUUID with the owner's session | Unknown; docs are silent | S2 |
-| HenrikDev cost per cold H2 and the Basic key's current limit | README says 30 a minute; v4 also counts Riot fetches | S3 |
+| HenrikDev cost per cold H2 and the Basic key's current limit | **Measured 2026-11-25 (S3):** 30 units per 60 s (`x-ratelimit-limit`, `-remaining`, `-reset`). H1 cost 3 units, H2 2 cold and 1 warm, H3 2. H2's per-player totals gave exactly the same K/D/A, ACS, HS% and ADR as E11 for the same match. H2: `metadata` {`match_id`, `map` {`id`, `name`}, `queue` {`id`}, `started_at`, `game_length_in_ms`, `is_completed`}; `players[]` {`puuid`, `name`, `tag`, `team_id`, `party_id`, `agent` {`id`}, `tier` {`id`}, `stats` {`score`, `kills`, `deaths`, `assists`, `headshots`, `bodyshots`, `legshots`, `damage` {`dealt`}}}; `teams[]` {`team_id`, `won`, `rounds` {`won`, `lost`}}. H3 `data.history[]`: `match_id`, `last_change`, `rr`, `tier` {`id`} | S3 |
 | An access token still works at 55 min | About 1 hour per valapidocs | S4 |
 
 **Risks**
