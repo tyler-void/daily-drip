@@ -11,9 +11,15 @@ import { matchWishlist } from "./wishlist.ts";
 /** Spec: a failed Discord send is retried 3 times with backoff (discord.js handles 429s itself). */
 export const SEND_RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
 
-export interface PostDeps {
-  state: State;
-  save: (state: State) => Promise<void>;
+/** What a post reads and writes: the owner's state, or a member's record. */
+export interface PostState {
+  lastSentHash: string | null;
+  wishlist: string[] | null;
+}
+
+export interface PostDeps<S extends PostState = State> {
+  state: S;
+  save: (state: S) => Promise<void>;
   withLock: WithLock;
   /** fetchShop with its dependencies. */
   fetchShop: () => Promise<ShopSnapshot>;
@@ -23,7 +29,7 @@ export interface PostDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
-export async function postShop(deps: PostDeps): Promise<ShopSnapshot> {
+export async function postShop<S extends PostState>(deps: PostDeps<S>): Promise<ShopSnapshot> {
   return deps.withLock(async () => {
     const snapshot = await deps.fetchShop();
     await deps.afterFetch?.();

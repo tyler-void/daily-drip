@@ -1,20 +1,47 @@
-// Slash commands (spec: Bot). Both are owner-only.
+// Slash commands (spec: Bot; Accounts).
 // /shop answers from the cached snapshot while it has not expired; otherwise it runs under the run lock.
 // /wishlist add|remove|list|clear manages the wishlist; add picks a gun, then one of its current skins.
+// Both answer the owner, and linked members about their own account (privately). /link and /unlink
+// exist only when member linking is set up (TOKEN_KEY).
 
-import { type Client, Events, MessageFlags, SlashCommandBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  type Client,
+  Events,
+  LabelBuilder,
+  MessageFlags,
+  ModalBuilder,
+  SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} from "discord.js";
+import type { Result } from "./accounts.ts";
 import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
 import { log, redact } from "./log.ts";
+import { linkDeadText } from "./members.ts";
 import { type DiscordMessage, shopMessage } from "./notify/discord.ts";
 import { CookieDeadError } from "./riot/auth.ts";
+import { LoginDeadError } from "./riot/login.ts";
 import type { ShopSnapshot } from "./shop.ts";
 import { addEntry, MAX_ENTRIES, MAX_ENTRY_LENGTH, matchWishlist, removeEntry, suggest } from "./wishlist.ts";
 
 export const ANY_WEAPON = "any";
 const NOT_OWNER = "Sorry, this bot only answers its owner.";
+const NOT_LINKED = "You aren't linked to this bot yet. Run `/link` to connect your Riot account.";
+const LINKING_OFF = "Linking isn't set up on this bot.";
+
+export const LINK_PASTE_BUTTON = "link:paste";
+export const LINK_MODAL = "link:modal";
+export const LINK_ADDRESS_FIELD = "address";
 
 export const shopCommand = new SlashCommandBuilder().setName("shop").setDescription("Show today's Valorant shop");
+export const linkCommand = new SlashCommandBuilder().setName("link").setDescription("Link your Riot account to get your own daily shop");
+export const unlinkCommand = new SlashCommandBuilder()
+  .setName("unlink")
+  .setDescription("Unlink your Riot account; the bot deletes what it holds about it");
 
 export const wishlistCommand = new SlashCommandBuilder()
   .setName("wishlist")
@@ -44,15 +71,42 @@ export const wishlistCommand = new SlashCommandBuilder()
   .addSubcommand((sub) => sub.setName("list").setDescription("Show your wishlist, and which entries are in today's shop"))
   .addSubcommand((sub) => sub.setName("clear").setDescription("Remove every entry"));
 
-/** Guild commands show up at once, unlike global ones. */
-export async function registerCommands(client: Client<true>, guildId: string): Promise<void> {
+/**
+ * Guild commands show up at once, unlike global ones. `set` replaces the whole list, so turning
+ * linking off also removes /link and /unlink.
+ */
+export async function registerCommands(client: Client<true>, guildId: string, linking = false): Promise<void> {
   const guild = await client.guilds.fetch(guildId);
-  await guild.commands.set([shopCommand.toJSON(), wishlistCommand.toJSON()]);
+  const commands = [shopCommand, wishlistCommand, ...(linking ? [linkCommand, unlinkCommand] : [])];
+  await guild.commands.set(commands.map((c) => c.toJSON()));
+}
+
+/** What /shop and /wishlist use for one Discord user: the owner's account, or a member's. */
+export interface UserShop {
+  currentSnapshot(): ShopSnapshot | null;
+  /** One run under the run lock. */
+  runShop(): Promise<ShopSnapshot>;
+  getWishlist(): string[];
+  /** Saves under the run lock. */
+  setWishlist(entries: string[]): Promise<void>;
+}
+
+/** Members' side of the commands. Absent when linking isn't set up. */
+export interface MemberCommands {
+  /** The member's shop, or null if this Discord user hasn't linked. */
+  shopFor(userId: string): UserShop | null;
+  /** May this user link? If so, a fresh sign-in link. */
+  startLink(userId: string): Result<{ url: string }>;
+  /** The pasted address -> a linked member. Under the run lock. */
+  finishLink(user: { id: string; username: string }, pasted: string): Promise<Result<{ riotName: string | null }>>;
+  /** Deletes the member's entry: sign-in token, shop and wishlist. Under the run lock. */
+  unlink(userId: string): Promise<Result<unknown>>;
 }
 
 export interface CommandDeps {
   ownerId: string;
   cookieFile: string;
+  // The owner's account:
   currentSnapshot(): ShopSnapshot | null;
   /** One run under the run lock. */
   runShop(): Promise<ShopSnapshot>;
@@ -61,8 +115,17 @@ export interface CommandDeps {
   setWishlist(entries: string[]): Promise<void>;
   /** Current store skins from the catalog, for autocomplete. */
   storeSkins(): StoreSkin[];
+  members?: MemberCommands;
   now?: () => number;
 }
+
+/** The owner's account, a linked member's, or null for anyone else. */
+function shopFor(userId: string, deps: CommandDeps): UserShop | null {
+  if (userId === deps.ownerId) return deps;
+  return deps.members?.shopFor(userId) ?? null;
+}
+
+const refusal = (deps: CommandDeps) => (deps.members ? NOT_LINKED : NOT_OWNER);
 
 // ---------- /shop ----------
 
@@ -75,22 +138,29 @@ export interface CommandInteraction {
 }
 
 export async function handleShopCommand(interaction: CommandInteraction, deps: CommandDeps): Promise<void> {
-  if (interaction.user.id !== deps.ownerId) {
-    await interaction.reply({ content: NOT_OWNER, flags: MessageFlags.Ephemeral });
+  const shop = shopFor(interaction.user.id, deps);
+  if (!shop) {
+    await interaction.reply({ content: refusal(deps), flags: MessageFlags.Ephemeral });
     return;
   }
-  const cached = liveSnapshot(deps);
+  // The owner's shop goes in the channel, like the daily post; a member's is only for them.
+  const isOwner = interaction.user.id === deps.ownerId;
+  const cached = liveSnapshot(shop, deps);
   if (cached) {
-    await interaction.reply(shopMessage(cached));
+    await interaction.reply(isOwner ? shopMessage(cached) : { ...shopMessage(cached), flags: MessageFlags.Ephemeral });
     return;
   }
   // A run takes a second or two; Discord wants an answer within 3 s, so defer first.
-  await interaction.deferReply();
+  await (isOwner ? interaction.deferReply() : interaction.deferReply({ flags: MessageFlags.Ephemeral }));
   try {
-    await interaction.editReply(shopMessage(await deps.runShop()));
+    await interaction.editReply(shopMessage(await shop.runShop()));
   } catch (err) {
     const text =
-      err instanceof CookieDeadError ? cookieDeadText(deps.cookieFile) : redact(`Couldn't fetch the shop: ${err instanceof Error ? err.message : String(err)}`);
+      err instanceof CookieDeadError
+        ? cookieDeadText(deps.cookieFile)
+        : err instanceof LoginDeadError
+          ? linkDeadText()
+          : redact(`Couldn't fetch the shop: ${err instanceof Error ? err.message : String(err)}`);
     await interaction.editReply(plain(text));
   }
 }
@@ -102,14 +172,15 @@ export interface WishlistInteraction extends CommandInteraction {
 }
 
 export async function handleWishlistCommand(interaction: WishlistInteraction, deps: CommandDeps): Promise<void> {
-  if (interaction.user.id !== deps.ownerId) {
-    await interaction.reply({ content: NOT_OWNER, flags: MessageFlags.Ephemeral });
+  const shop = shopFor(interaction.user.id, deps);
+  if (!shop) {
+    await interaction.reply({ content: refusal(deps), flags: MessageFlags.Ephemeral });
     return;
   }
   // Private replies; deferred because saving waits for the run lock.
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const entries = deps.getWishlist();
-  const offers = liveSnapshot(deps)?.offers ?? [];
+  const entries = shop.getWishlist();
+  const offers = liveSnapshot(shop, deps)?.offers ?? [];
   let text: string;
 
   switch (interaction.options.getSubcommand()) {
@@ -124,7 +195,7 @@ export async function handleWishlistCommand(interaction: WishlistInteraction, de
         text = change.reason;
         break;
       }
-      await deps.setWishlist(change.entries);
+      await shop.setWishlist(change.entries);
       text = `Added **${change.entry}**.\n\n${listText(change.entries, offers)}`;
       break;
     }
@@ -134,7 +205,7 @@ export async function handleWishlistCommand(interaction: WishlistInteraction, de
         text = change.reason;
         break;
       }
-      await deps.setWishlist(change.entries);
+      await shop.setWishlist(change.entries);
       text = `Removed **${change.entry}**.\n\n${listText(change.entries, offers)}`;
       break;
     }
@@ -146,7 +217,7 @@ export async function handleWishlistCommand(interaction: WishlistInteraction, de
         text = "Your wishlist is already empty.";
         break;
       }
-      await deps.setWishlist([]);
+      await shop.setWishlist([]);
       text = `Cleared your wishlist (${entries.length} ${entries.length === 1 ? "entry" : "entries"}).`;
       break;
     default:
@@ -201,16 +272,18 @@ export interface WishlistAutocomplete {
 }
 
 export async function handleWishlistAutocomplete(interaction: WishlistAutocomplete, deps: CommandDeps): Promise<void> {
-  if (interaction.user.id !== deps.ownerId) {
+  const shop = shopFor(interaction.user.id, deps);
+  if (!shop) {
     await interaction.respond([]);
     return;
   }
   const focused = interaction.options.getFocused(true);
-  await interaction.respond(wishlistChoices(focused.name, String(focused.value), interaction.options.getString("weapon"), deps).map(limitChoice));
+  const choices = wishlistChoices(focused.name, String(focused.value), interaction.options.getString("weapon"), deps, shop.getWishlist());
+  await interaction.respond(choices.map(limitChoice));
 }
 
-/** At most 25 suggestions (Discord's limit) for the focused option. */
-export function wishlistChoices(option: string, typed: string, weapon: string | null, deps: CommandDeps): Choice[] {
+/** At most 25 suggestions (Discord's limit) for the focused option. `wishlist` is the asking user's. */
+export function wishlistChoices(option: string, typed: string, weapon: string | null, deps: CommandDeps, wishlist: string[] = deps.getWishlist()): Choice[] {
   const skins = deps.storeSkins();
   if (option === "weapon") {
     const weapons = [...new Set(skins.map((s) => s.weapon))].sort((a, b) => a.localeCompare(b));
@@ -225,8 +298,123 @@ export function wishlistChoices(option: string, typed: string, weapon: string | 
     const text = typed.trim();
     return text.length >= 2 ? [{ name: `${text} (every skin with this in its name)`, value: text }, ...names] : names;
   }
-  if (option === "entry") return suggest(deps.getWishlist(), typed, 25).map((e) => ({ name: e, value: e }));
+  if (option === "entry") return suggest(wishlist, typed, 25).map((e) => ({ name: e, value: e }));
   return [];
+}
+
+// ---------- /link and /unlink ----------
+
+export const LINK_STEPS = [
+  "**Link your Riot account**",
+  "1. Press **Sign in with Riot**. It opens Riot's own sign-in page: sign in there, never in Discord.",
+  "2. Your browser then lands on a page that fails to load. Copy its whole address: it starts with `http://localhost/redirect?` and contains `code=`.",
+  "3. Press **Paste the address** and paste it within a few minutes.",
+  "",
+  "The bot keeps a sign-in token for your account, encrypted, and uses it only to read your daily shop. `/unlink` deletes it.",
+].join("\n");
+
+export interface ReplyInteraction {
+  user: { id: string; username: string };
+  reply(options: { content: string; components?: ActionRowBuilder<ButtonBuilder>[]; flags?: number }): Promise<unknown>;
+}
+
+export async function handleLinkCommand(interaction: ReplyInteraction, deps: CommandDeps): Promise<void> {
+  if (!deps.members) {
+    await interaction.reply({ content: LINKING_OFF, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const start = deps.members.startLink(interaction.user.id);
+  if (!start.ok) {
+    await interaction.reply({ content: start.reason, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(start.value.url).setLabel("Sign in with Riot"),
+    new ButtonBuilder().setStyle(ButtonStyle.Primary).setCustomId(LINK_PASTE_BUTTON).setLabel("Paste the address"),
+  );
+  await interaction.reply({ content: LINK_STEPS, components: [row], flags: MessageFlags.Ephemeral });
+}
+
+/** The form for the pasted address. Discord allows up to 4,000 characters; the address is far shorter. */
+export function pasteModal(): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(LINK_MODAL)
+    .setTitle("Link your Riot account")
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel("The address from your browser")
+        .setDescription("It starts with http://localhost/redirect? and contains code=")
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId(LINK_ADDRESS_FIELD)
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(4000)
+            .setPlaceholder("http://localhost/redirect?...&code=..."),
+        ),
+    );
+}
+
+export interface PasteButtonInteraction {
+  showModal(modal: ModalBuilder): Promise<unknown>;
+  reply(options: { content: string; flags?: number }): Promise<unknown>;
+}
+
+export async function handlePasteButton(interaction: PasteButtonInteraction, deps: CommandDeps): Promise<void> {
+  if (!deps.members) {
+    await interaction.reply({ content: LINKING_OFF, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.showModal(pasteModal());
+}
+
+export interface LinkModalInteraction {
+  user: { id: string; username: string };
+  fields: { getTextInputValue(customId: string): string };
+  deferReply(options?: { flags?: number }): Promise<unknown>;
+  editReply(options: DiscordMessage): Promise<unknown>;
+}
+
+export async function handleLinkModal(interaction: LinkModalInteraction, deps: CommandDeps): Promise<void> {
+  // Linking signs in to Riot, which takes longer than Discord's 3 s.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!deps.members) {
+    await interaction.editReply(plain(LINKING_OFF));
+    return;
+  }
+  let text: string;
+  try {
+    // The pasted address holds a one-time code: it goes to completeLink and nowhere else.
+    const pasted = interaction.fields.getTextInputValue(LINK_ADDRESS_FIELD);
+    const result = await deps.members.finishLink({ id: interaction.user.id, username: interaction.user.username }, pasted);
+    text = result.ok
+      ? `Linked${result.value.riotName ? ` as **${result.value.riotName}**` : ""}. Your shop arrives by DM after each reset, and \`/shop\` shows it now.`
+      : result.reason;
+  } catch (err) {
+    text = redact(`Couldn't finish linking: ${err instanceof Error ? err.message : String(err)}. Try \`/link\` again.`);
+  }
+  await interaction.editReply(plain(text));
+}
+
+export interface UnlinkInteraction {
+  user: { id: string };
+  deferReply(options?: { flags?: number }): Promise<unknown>;
+  editReply(options: DiscordMessage): Promise<unknown>;
+  reply(options: { content: string; flags?: number }): Promise<unknown>;
+}
+
+export const UNLINKED =
+  "Unlinked. The bot deleted your sign-in token, shop and wishlist. To end the Riot sign-in itself as well, choose **Sign out of all devices** in your Riot account settings.";
+
+export async function handleUnlinkCommand(interaction: UnlinkInteraction, deps: CommandDeps): Promise<void> {
+  if (!deps.members) {
+    await interaction.reply({ content: LINKING_OFF, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  // Deferred: deleting waits for the run lock.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const result = await deps.members.unlink(interaction.user.id);
+  await interaction.editReply(plain(result.ok ? UNLINKED : result.reason));
 }
 
 // ---------- wiring ----------
@@ -238,17 +426,28 @@ export function listenForCommands(client: Client, deps: CommandDeps): void {
         if (interaction.commandName === "wishlist") await handleWishlistAutocomplete(interaction, deps);
         return;
       }
+      if (interaction.isButton()) {
+        if (interaction.customId === LINK_PASTE_BUTTON) await handlePasteButton(interaction, deps);
+        return;
+      }
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId === LINK_MODAL) await handleLinkModal(interaction, deps);
+        return;
+      }
       if (!interaction.isChatInputCommand()) return;
       if (interaction.commandName === "shop") await handleShopCommand(interaction, deps);
       else if (interaction.commandName === "wishlist") await handleWishlistCommand(interaction, deps);
+      else if (interaction.commandName === "link") await handleLinkCommand(interaction, deps);
+      else if (interaction.commandName === "unlink") await handleUnlinkCommand(interaction, deps);
     } catch (err) {
+      // Error messages only: never the interaction, which can hold a pasted sign-in address.
       log.error("command failed", { error: err });
     }
   });
 }
 
-function liveSnapshot(deps: CommandDeps): ShopSnapshot | null {
-  const snapshot = deps.currentSnapshot();
+function liveSnapshot(shop: UserShop, deps: CommandDeps): ShopSnapshot | null {
+  const snapshot = shop.currentSnapshot();
   return snapshot && Date.parse(snapshot.expiresAt) > (deps.now?.() ?? Date.now()) ? snapshot : null;
 }
 

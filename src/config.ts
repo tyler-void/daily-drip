@@ -13,6 +13,11 @@ const schema = z.object({
   RIOT_SHARD: z.string().regex(/^[a-z]+$/, "lowercase letters only, e.g. ap").optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   HEALTHCHECK_URL: z.url().optional(),
+  // Seals members' refresh tokens (src/secretbox.ts). Without it, /link is off and only the owner is served.
+  TOKEN_KEY: z
+    .string()
+    .refine((v) => Buffer.from(v.trim(), "base64").length === 32, "must be 32 random bytes, base64 (openssl rand -base64 32)")
+    .optional(),
 });
 
 export type Config = z.infer<typeof schema>;

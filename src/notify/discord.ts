@@ -88,6 +88,45 @@ export async function startDiscord(token: string): Promise<Client<true>> {
   return ready;
 }
 
+/** Discord's error code when a user doesn't accept DMs from the bot. */
+const CANNOT_DM = 50007;
+
+/**
+ * A member's notifier: their shop, wishlist hits and alerts go to them by DM, since a member's shop
+ * is their own. If they don't accept DMs, one short note in the channel tells them how to fix it;
+ * the shop itself is never posted there. The note is sent at most once per process.
+ */
+export function createMemberNotifier(client: Client, userId: string, fallbackChannelId: string): Notifier {
+  let noteSent = false;
+  async function dm(message: DiscordMessage): Promise<void> {
+    try {
+      const user = await client.users.fetch(userId);
+      await user.send(message);
+    } catch (err) {
+      if ((err as { code?: number }).code !== CANNOT_DM) throw err;
+      if (!noteSent) {
+        const channel = await client.channels.fetch(fallbackChannelId);
+        if (channel?.isSendable()) {
+          await channel.send(
+            alertMessage("I can't send you your daily shop: your Discord settings block DMs from this server's members. Allow them under Privacy Settings for this server, then use `/shop`.", userId),
+          );
+          noteSent = true;
+        }
+      }
+      throw err;
+    }
+  }
+  return {
+    async sendShop(snapshot, wishlistHits) {
+      if (wishlistHits.length > 0) await dm(wishlistMessage(wishlistHits, userId));
+      await dm(shopMessage(snapshot));
+    },
+    async sendAlert(text) {
+      await dm({ content: text, embeds: [], allowedMentions: { parse: [] } });
+    },
+  };
+}
+
 export function createDiscordNotifier(client: Client, channelId: string, ownerId: string): Notifier {
   async function channel() {
     const found = await client.channels.fetch(channelId);

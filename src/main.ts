@@ -1,16 +1,22 @@
-// Entry point: the Discord bot plus the scheduler.
+// Entry point: the Discord bot plus the schedulers.
 // Runs once at start, then after every shop reset; answers /shop and /wishlist in between.
+// With TOKEN_KEY set, members can /link their own Riot account (spec: Accounts).
 
-import { ensureOwner } from "./accounts.ts";
+import { ensureOwner, type LinkedAccount, members, removeMember } from "./accounts.ts";
 import { loadCatalog, storeSkins } from "./catalog.ts";
-import { listenForCommands, registerCommands } from "./commands.ts";
+import { listenForCommands, type MemberCommands, registerCommands } from "./commands.ts";
 import { loadConfig } from "./config.ts";
 import { createHttp } from "./http.ts";
 import { createLock } from "./lock.ts";
 import { addSecret, log } from "./log.ts";
-import { checkDiscordSetup, createDiscordNotifier, DiscordSetupError, startDiscord } from "./notify/discord.ts";
+import { createMemberScheduler } from "./memberScheduler.ts";
+import { canStartLink, completeLink, fetchMemberShop, linkDeadText, type MemberDeps } from "./members.ts";
+import { checkDiscordSetup, createDiscordNotifier, createMemberNotifier, DiscordSetupError, startDiscord } from "./notify/discord.ts";
+import type { Notifier } from "./notify/notifier.ts";
 import { postShop } from "./post.ts";
+import { buildSignInUrl } from "./riot/login.ts";
 import { createScheduler } from "./scheduler.ts";
+import { importKey } from "./secretbox.ts";
 import { fetchShop, type ShopDeps } from "./shop.ts";
 import { loadState, saveState } from "./state.ts";
 import { ensureWishlist, wishlistPath } from "./wishlist.ts";
@@ -38,6 +44,12 @@ const shopDeps: ShopDeps = {
   shardOverride: config.RIOT_SHARD,
 };
 
+// Members (spec: Accounts) only with TOKEN_KEY, which seals their refresh tokens at rest.
+if (config.TOKEN_KEY) addSecret(config.TOKEN_KEY);
+const memberDeps: MemberDeps | null = config.TOKEN_KEY
+  ? { http: shopDeps.http, key: await importKey(config.TOKEN_KEY), save: () => saveState(state) }
+  : null;
+
 const client = await startDiscord(config.DISCORD_TOKEN).catch((err: unknown) => {
   // discord.js says "An invalid token was provided." without echoing the token.
   log.error(`could not log in to Discord: ${err instanceof Error ? err.message : String(err)}. Check DISCORD_TOKEN.`);
@@ -46,7 +58,7 @@ const client = await startDiscord(config.DISCORD_TOKEN).catch((err: unknown) => 
 log.info("connected to Discord", { as: client.user.tag });
 try {
   await checkDiscordSetup(client, config.DISCORD_GUILD_ID, config.DISCORD_CHANNEL_ID);
-  await registerCommands(client, config.DISCORD_GUILD_ID);
+  await registerCommands(client, config.DISCORD_GUILD_ID, memberDeps !== null);
 } catch (err) {
   log.error(`Discord setup: ${err instanceof DiscordSetupError ? err.message : String(err)}`);
   await client.destroy();
@@ -60,6 +72,69 @@ if (ensureOwner(state.accounts, { discordUserId: config.DISCORD_OWNER_ID, discor
 }
 
 const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
+
+// One notifier per member, kept for the process, so the "allow DMs" note goes out once.
+const memberNotifiers = new Map<string, Notifier>();
+const memberNotifier = (userId: string): Notifier => {
+  let found = memberNotifiers.get(userId);
+  if (!found) {
+    found = createMemberNotifier(client, userId, config.DISCORD_CHANNEL_ID);
+    memberNotifiers.set(userId, found);
+  }
+  return found;
+};
+
+/** The member's current entry, if they are still linked. Checked inside the lock, after any wait. */
+function stillLinked(account: LinkedAccount): NonNullable<LinkedAccount["member"]> {
+  const member = state.accounts[account.discordUserId] === account ? account.member : null;
+  if (!member) throw new Error(`${account.discordUsername} unlinked before their run`);
+  return member;
+}
+
+const memberCommands: MemberCommands | undefined = memberDeps
+  ? {
+      shopFor(userId) {
+        const account = state.accounts[userId];
+        if (account?.role !== "member" || !account.member) return null;
+        return {
+          currentSnapshot: () => account.member?.snapshot ?? null,
+          runShop: () =>
+            withLock(async () => {
+              stillLinked(account);
+              const snapshot = await fetchMemberShop(account, memberDeps);
+              await reloadSkinList();
+              return snapshot;
+            }),
+          getWishlist: () => account.member?.wishlist ?? [],
+          setWishlist: (entries) =>
+            withLock(async () => {
+              stillLinked(account).wishlist = entries;
+              await saveState(state);
+            }),
+        };
+      },
+      startLink(userId) {
+        const allowed = canStartLink(state.accounts, userId);
+        return allowed.ok ? { ok: true, value: { url: buildSignInUrl() } } : allowed;
+      },
+      finishLink: (user, pasted) =>
+        withLock(async () => {
+          const linked = await completeLink(state.accounts, { discordUserId: user.id, discordUsername: user.username }, pasted, memberDeps);
+          if (linked.ok) log.info("a member linked their Riot account", { member: linked.value.discordUsername });
+          return linked.ok ? { ok: true, value: { riotName: linked.value.riotName } } : linked;
+        }),
+      unlink: (userId) =>
+        withLock(async () => {
+          const removed = removeMember(state.accounts, userId);
+          if (removed.ok) {
+            memberNotifiers.delete(userId);
+            await saveState(state);
+            log.info("a member unlinked", { member: removed.value.discordUsername });
+          }
+          return removed;
+        }),
+    }
+  : undefined;
 
 listenForCommands(client, {
   ownerId: config.DISCORD_OWNER_ID,
@@ -78,6 +153,7 @@ listenForCommands(client, {
       await saveState(state);
     }),
   storeSkins: () => skinList,
+  members: memberCommands,
 });
 
 const healthcheckUrl = config.HEALTHCHECK_URL;
@@ -95,13 +171,38 @@ const scheduler = createScheduler({
     : undefined,
 });
 scheduler.start();
-log.info("running; press Ctrl+C to stop");
+
+const memberScheduler = memberDeps
+  ? createMemberScheduler({
+      accounts: () => state.accounts,
+      run: (account) =>
+        postShop({
+          state: account.member as NonNullable<LinkedAccount["member"]>,
+          save: () => saveState(state),
+          withLock,
+          fetchShop: () => {
+            stillLinked(account);
+            return fetchMemberShop(account, memberDeps);
+          },
+          notifier: memberNotifier(account.discordUserId),
+          afterFetch: reloadSkinList,
+        }),
+      notifyLinkDead: (account) => memberNotifier(account.discordUserId).sendAlert(linkDeadText()),
+      save: () => saveState(state),
+    })
+  : null;
+memberScheduler?.start();
+log.info("running; press Ctrl+C to stop", {
+  linking: memberDeps ? "on" : "off (no TOKEN_KEY)",
+  members: members(state.accounts).length,
+});
 
 // Docker stops containers with SIGTERM; close the gateway connection cleanly.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log.info(`${signal}: shutting down`);
     scheduler.stop();
+    memberScheduler?.stop();
     void client.destroy().finally(() => process.exit(0));
   });
 }
