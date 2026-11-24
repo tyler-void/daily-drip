@@ -101,34 +101,41 @@ export async function completeLink(
 }
 
 /**
- * One member's run: refresh -> session -> snapshot. Riot may rotate the refresh token on any use,
- * and only the newest one works, so a changed token is sealed and saved before anything else can
- * fail. Throws LoginDeadError when the member must link again; other errors are the owner's run's.
+ * A fresh session for a linked member, from their sealed refresh token: the one refresh path the shop
+ * and recaps share (Match Recap Spec: Fit into daily-drip). Riot may rotate the refresh token on any
+ * use, and only the newest one works, so a changed token is sealed and saved before anything else
+ * can fail. Run it under the run lock, so two refreshes never overlap. Throws LoginDeadError when
+ * the member must link again.
  */
-export async function fetchMemberShop(account: LinkedAccount, deps: MemberDeps): Promise<ShopSnapshot> {
+export async function memberSession(account: LinkedAccount, deps: MemberDeps): Promise<Session> {
   const member = account.member;
   if (!member) throw new LoginDeadError(`${account.discordUsername} hasn't finished linking`);
+  const held = await open(deps.key, member.sealedRefreshToken);
+  const tokens = await refreshTokens(deps.http, held);
+  if (tokens.refreshToken !== held) {
+    member.sealedRefreshToken = await seal(deps.key, tokens.refreshToken);
+    await deps.save();
+  }
+  const cache = { puuid: account.puuid, shard: member.shard };
+  const { session, cacheChanged } = await completeSession(deps.http, tokens, cache);
+  if (cacheChanged) {
+    account.puuid = cache.puuid;
+    member.shard = cache.shard;
+    await deps.save();
+  }
+  // A changed Riot ID is saved with the next save; it labels their shop post and recaps.
+  if (session.riotName) account.riotName = session.riotName;
+  return session;
+}
 
-  const session = async (): Promise<Session> => {
-    const held = await open(deps.key, member.sealedRefreshToken);
-    const tokens = await refreshTokens(deps.http, held);
-    if (tokens.refreshToken !== held) {
-      member.sealedRefreshToken = await seal(deps.key, tokens.refreshToken);
-      await deps.save();
-    }
-    const cache = { puuid: account.puuid, shard: member.shard };
-    const { session, cacheChanged } = await completeSession(deps.http, tokens, cache);
-    if (cacheChanged) {
-      account.puuid = cache.puuid;
-      member.shard = cache.shard;
-      await deps.save();
-    }
-    // A changed Riot ID is saved with the snapshot below; it labels their shop post.
-    if (session.riotName) account.riotName = session.riotName;
-    return session;
-  };
-
-  const snapshot = await fetchSnapshot({ http: deps.http, catalogFile: deps.catalogFile, session });
+/**
+ * One member's shop run: session -> snapshot. `session` defaults to a fresh one; recaps pass their
+ * session cache's, so a recently minted session is reused instead of refreshed again.
+ */
+export async function fetchMemberShop(account: LinkedAccount, deps: MemberDeps, session?: () => Promise<Session>): Promise<ShopSnapshot> {
+  const member = account.member;
+  if (!member) throw new LoginDeadError(`${account.discordUsername} hasn't finished linking`);
+  const snapshot = await fetchSnapshot({ http: deps.http, catalogFile: deps.catalogFile, session: session ?? (() => memberSession(account, deps)) });
   member.snapshot = snapshot;
   member.lastSuccessAt = snapshot.fetchedAt;
   member.linkDeadNotified = false;
