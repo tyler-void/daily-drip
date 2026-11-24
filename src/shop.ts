@@ -92,6 +92,22 @@ export function buildSnapshot(
   };
 }
 
+/**
+ * A saved snapshot as it should be shown now: offers saved before links existed (no `links` key) get
+ * them from the current catalog. Offers that already have links, or `links: null`, are left alone.
+ */
+export function withLinks(snapshot: ShopSnapshot | null, catalog: Catalog | null): ShopSnapshot | null {
+  if (!snapshot || !catalog || snapshot.offers.every((o) => "links" in o)) return snapshot;
+  return {
+    ...snapshot,
+    offers: snapshot.offers.map((o) => {
+      if ("links" in o) return o;
+      const skin = catalog.skins[o.levelUuid];
+      return { ...o, links: skin?.collection ? offerLinks(skin.collection, skin.video ?? null, catalog.fandom ?? null) : null };
+    }),
+  };
+}
+
 /** The owner's run. Saves the snapshot in state; throws the typed errors the scheduler reacts to. */
 export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   const { state } = deps;

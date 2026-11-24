@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildCatalogEntries, type Catalog, CATALOG_SCHEMA, loadCatalog, saveCatalog, TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
 import { REAUTH_URL, UnexpectedResponseError, USERINFO_URL } from "../src/riot/auth.ts";
 import { BadClaimsError, MaintenanceError } from "../src/riot/store.ts";
-import { buildSnapshot, fetchShop, type ShopDeps, snapshotHash } from "../src/shop.ts";
+import { buildSnapshot, fetchShop, type ShopDeps, snapshotHash, withLinks } from "../src/shop.ts";
 import { emptyState, type State } from "../src/state.ts";
 import {
   fakeRiot,
@@ -211,4 +211,24 @@ test("the owner's run hands each new session to onSession (it carries the Riot I
   const seen: Array<string | null> = [];
   await fetchShop({ ...deps(riot.http), onSession: (session) => void seen.push(session.riotName) });
   expect(seen).toEqual(["Owner#0001"]);
+});
+
+describe("withLinks", () => {
+  test("a shop saved before links gets them from the current catalog", () => {
+    const old = buildSnapshot({ offers: [LEVEL_VANDAL, LEVEL_UNKNOWN], remainingSeconds: 60, prices: {} }, catalog(), null, MIDNIGHT);
+    for (const o of old.offers) delete o.links;
+    const shown = withLinks(old, catalog());
+    expect(shown?.offers[0]?.links?.fandom).toBe("https://valorant.fandom.com/wiki/Imperium_Collection");
+    expect(shown?.offers[0]?.links?.preview).toBe(VANDAL_VIDEO_TOP);
+    expect(shown?.offers[1]?.links).toBeNull();
+    expect(old.offers[0]?.links).toBeUndefined(); // the saved one is not changed
+  });
+
+  test("a shop that already has links, no shop, or no catalog is returned as it is", () => {
+    const fresh = buildSnapshot({ offers: [LEVEL_VANDAL], remainingSeconds: 60, prices: {} }, catalog(), null, MIDNIGHT);
+    expect(withLinks(fresh, catalog())).toBe(fresh);
+    expect(withLinks(null, catalog())).toBeNull();
+    const old = { ...fresh, offers: fresh.offers.map(({ links: _, ...o }) => o) };
+    expect(withLinks(old, null)).toBe(old);
+  });
 });

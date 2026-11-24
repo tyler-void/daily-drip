@@ -17,7 +17,7 @@ import { postShop } from "./post.ts";
 import { buildSignInUrl } from "./riot/login.ts";
 import { createScheduler } from "./scheduler.ts";
 import { importKey } from "./secretbox.ts";
-import { fetchShop, type ShopDeps } from "./shop.ts";
+import { fetchShop, type ShopDeps, withLinks } from "./shop.ts";
 import { loadState, saveState } from "./state.ts";
 import { ensureWishlist, wishlistPath } from "./wishlist.ts";
 
@@ -31,9 +31,12 @@ const withLock = createLock();
 const save = (s: typeof state) => saveState(s);
 
 // Store skins for /wishlist autocomplete; reloaded after each run, since a run may refresh the catalog.
-let skinList = storeSkins(await loadCatalog());
+// The catalog also fills in links on shops saved before links existed (withLinks).
+let catalog = await loadCatalog();
+let skinList = storeSkins(catalog);
 const reloadSkinList = async () => {
-  skinList = storeSkins(await loadCatalog());
+  catalog = await loadCatalog();
+  skinList = storeSkins(catalog);
 };
 
 const shopDeps: ShopDeps = {
@@ -104,7 +107,7 @@ const memberCommands: MemberCommands | undefined = memberDeps
         const account = state.accounts[userId];
         if (account?.role !== "member" || !account.member) return null;
         return {
-          currentSnapshot: () => account.member?.snapshot ?? null,
+          currentSnapshot: () => withLinks(account.member?.snapshot ?? null, catalog),
           runShop: () =>
             withLock(async () => {
               stillLinked(account);
@@ -146,7 +149,7 @@ const memberCommands: MemberCommands | undefined = memberDeps
 listenForCommands(client, {
   ownerId: config.DISCORD_OWNER_ID,
   cookieFile: config.RIOT_COOKIE_FILE,
-  currentSnapshot: () => state.snapshot,
+  currentSnapshot: () => withLinks(state.snapshot, catalog),
   runShop: () =>
     withLock(async () => {
       const snapshot = await fetchShop(shopDeps);
