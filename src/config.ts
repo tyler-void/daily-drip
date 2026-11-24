@@ -13,6 +13,8 @@ const schema = z.object({
   RIOT_SHARD: z.string().regex(/^[a-z]+$/, "lowercase letters only, e.g. ap").optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   HEALTHCHECK_URL: z.url().optional(),
+  // HenrikDev key for recaps of followed friends (Match Recap Spec). Without it, only the linked tier.
+  HENRIK_API_KEY: z.string().min(10, "looks too short for a HenrikDev key").optional(),
   // Seals members' refresh tokens (src/secretbox.ts). Without it, /link is off and only the owner is served.
   TOKEN_KEY: z
     .string()

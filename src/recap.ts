@@ -1,8 +1,10 @@
-// Match recap, pure part (Match Recap Spec: Riot pd endpoints & stat formulas).
+// Match recap, pure part (Match Recap Spec: Riot pd endpoints & stat formulas; HenrikDev integration).
 //
-// E11 (match details) -> MatchRecap: every player's K/D/A, ACS, HS% and ADR, and each team's result.
-// Field names confirmed by spike S2 on 2026-11-25. Names (map, agent, rank) are resolved later from
-// valorant-api.com; this module keeps Riot's IDs. Nothing here does I/O.
+// E11 (Riot match details) or H2 (a HenrikDev v4 match) -> MatchRecap: every player's K/D/A, ACS,
+// HS% and ADR, and each team's result, with the same formulas for both. Field names confirmed by
+// spikes S2 and S3 on 2026-11-25; both sources gave identical numbers for the same match.
+// Names (map, agent, rank) are resolved later from valorant-api.com, except that HenrikDev already
+// names the map. Nothing here does I/O.
 
 export interface RecapPlayer {
   puuid: string;
@@ -32,7 +34,10 @@ export interface RecapTeam {
 
 export interface MatchRecap {
   matchId: string;
+  /** Riot's map path, e.g. "/Game/Maps/Ascent/Ascent" (E11), or valorant-api.com's map UUID (H2). */
   mapId: string;
+  /** The map's name when the source gives it (H2); otherwise resolved from mapId. */
+  mapName?: string;
   queue: string;
   startedAt: string;
   lengthMinutes: number;
@@ -114,6 +119,63 @@ export function recapFromMatchDetails(body: unknown): MatchRecap | null {
     lengthMinutes: Math.round(num(info.gameLengthMillis) / 60_000),
     completed: info.isCompleted === true,
     rounds: roundResults.length,
+    teams,
+    players,
+  };
+}
+
+/**
+ * H2 (one entry of HenrikDev's v4 matches `data`) -> MatchRecap. Its per-player totals replace
+ * E11's per-round damage entries: ACS = score / rounds, HS% = head / (head + body + leg), ADR =
+ * damage dealt / rounds, with rounds = the length of the match's `rounds` array (spec).
+ */
+export function recapFromHenrikMatch(match: unknown): MatchRecap | null {
+  const meta = obj(field(match, "metadata"));
+  const matchId = str(meta?.match_id);
+  const rawPlayers = arr(field(match, "players"));
+  if (!meta || !matchId || rawPlayers.length === 0) return null;
+  const rounds = arr(field(match, "rounds")).length;
+  const players = rawPlayers.flatMap((p): RecapPlayer[] => {
+    const puuid = str(field(p, "puuid"));
+    if (!puuid) return [];
+    const stats = obj(field(p, "stats"));
+    const perRound = rounds || 1;
+    const head = num(stats?.headshots);
+    const hits = head + num(stats?.bodyshots) + num(stats?.legshots);
+    const damage = obj(stats?.damage);
+    const name = str(field(p, "name"));
+    const tag = str(field(p, "tag"));
+    return [
+      {
+        puuid,
+        riotName: name ? (tag ? `${name}#${tag}` : name) : null,
+        teamId: str(field(p, "team_id")) ?? "",
+        partyId: str(field(p, "party_id")),
+        agentId: (str(field(field(p, "agent"), "id")) ?? "").toLowerCase(),
+        tier: num(field(field(p, "tier"), "id")),
+        kills: stats ? num(stats.kills) : null,
+        deaths: stats ? num(stats.deaths) : null,
+        assists: stats ? num(stats.assists) : null,
+        acs: stats ? Math.round(num(stats.score) / perRound) : null,
+        hsPercent: hits > 0 ? Math.round((100 * head) / hits) : null,
+        adr: stats ? Math.round(num(damage ? damage.dealt : stats.damage) / perRound) : null,
+      },
+    ];
+  });
+  const teams = arr(field(match, "teams")).flatMap((t): RecapTeam[] => {
+    const teamId = str(field(t, "team_id"));
+    return teamId ? [{ teamId, won: field(t, "won") === true, roundsWon: num(field(field(t, "rounds"), "won")) }] : [];
+  });
+  const map = obj(meta.map);
+  return {
+    matchId,
+    mapId: str(map?.id) ?? "",
+    mapName: str(map?.name) ?? undefined,
+    queue: str(obj(meta.queue)?.id) ?? "",
+    startedAt: str(meta.started_at) ?? new Date(0).toISOString(),
+    lengthMinutes: Math.round(num(meta.game_length_in_ms) / 60_000),
+    completed: meta.is_completed === true,
+    rounds,
     teams,
     players,
   };

@@ -1,7 +1,7 @@
 // A synthetic E11 match built on the field names spike S2 confirmed. No real players' data.
 
 import { expect, test } from "bun:test";
-import { recapFromMatchDetails, teamByAcs, teamResult } from "../src/recap.ts";
+import { recapFromHenrikMatch, recapFromMatchDetails, teamByAcs, teamResult } from "../src/recap.ts";
 
 const A = "aaaaaaaa-0000-0000-0000-00000000000a";
 const B = "bbbbbbbb-0000-0000-0000-00000000000b";
@@ -105,4 +105,45 @@ test("a team's players sorted by ACS, those without stats last", () => {
   const r = recapFromMatchDetails(match())!;
   expect(teamByAcs(r, "Blue").map((p) => p.puuid)).toEqual([A, B]);
   expect(teamByAcs(r, "Red").map((p) => p.puuid)).toEqual([C, D]);
+});
+
+// ---------- HenrikDev v4 (H2) ----------
+
+
+/** The same two players' totals as the E11 fixture above, in HenrikDev's shape. */
+function henrikMatch() {
+  return {
+    metadata: {
+      match_id: "m-1",
+      map: { id: "7eaecc1b-4337-bbf6-6ab9-04b8f06b3319", name: "Ascent" },
+      queue: { id: "competitive", name: "Competitive", mode_type: "Standard" },
+      started_at: "2026-11-24T15:00:00.000Z",
+      game_length_in_ms: 38 * 60_000 + 20_000,
+      is_completed: true,
+    },
+    players: [
+      { puuid: A, name: "Tyler", tag: "0001", team_id: "Blue", party_id: "p1", agent: { id: "ADD6443A-41BD-E414-F6AD-E58D267F4E95", name: "Jett" }, tier: { id: 13, name: "Gold 2" }, stats: { score: 540, kills: 4, deaths: 1, assists: 1, headshots: 2, bodyshots: 3, legshots: 1, damage: { dealt: 324, received: 80 } } },
+      { puuid: D, name: "Ghost", tag: "0004", team_id: "Red", party_id: "p3", agent: { id: "x-omen" }, tier: { id: 0 }, stats: null },
+    ],
+    teams: [
+      { team_id: "Red", rounds: { won: 9, lost: 13 }, won: false },
+      { team_id: "Blue", rounds: { won: 13, lost: 9 }, won: true },
+    ],
+    rounds: [{}, {}],
+  };
+}
+
+test("H2: the same formulas give the same numbers as E11 for the same totals", () => {
+  const fromHenrik = recapFromHenrikMatch(henrikMatch())!;
+  const fromRiot = recapFromMatchDetails(match())!;
+  const a = fromHenrik.players.find((p) => p.puuid === A);
+  expect(a).toEqual(fromRiot.players.find((p) => p.puuid === A));
+  expect(fromHenrik).toMatchObject({ matchId: "m-1", mapName: "Ascent", queue: "competitive", startedAt: "2026-11-24T15:00:00.000Z", lengthMinutes: 38, completed: true, rounds: 2 });
+  expect(fromHenrik.teams).toEqual(fromRiot.teams);
+  expect(fromHenrik.players.find((p) => p.puuid === D)).toMatchObject({ kills: null, acs: null, hsPercent: null, adr: null });
+});
+
+test("H2: anything that isn't a match gives null", () => {
+  expect(recapFromHenrikMatch(null)).toBeNull();
+  expect(recapFromHenrikMatch({ metadata: { match_id: "m" }, players: [] })).toBeNull();
 });

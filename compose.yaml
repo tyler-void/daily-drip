@@ -23,6 +23,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
       TOKEN_KEY: ${TOKEN_KEY:-}
+      HENRIK_API_KEY: ${HENRIK_API_KEY:-}
       TZ: ${TZ:-UTC}
     volumes:
       - daily-drip-data:/app/data
