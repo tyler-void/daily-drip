@@ -203,11 +203,21 @@ Besides the owner, up to 10 members of the private server can link their own Rio
 - The owner is added on every start, with the owner role, and can't be removed with a command.
 - At most 10 members. Riot rate-limits an IP when many accounts sign in close together ([SkinPeek admin guide](https://github.com/giorgi-o/SkinPeek/wiki/SkinPeek-Admin-Guide)), and every member is someone whose account access the server holds.
 
-**Onboarding (planned): Riot Mobile QR login.** `/link` shows a QR code that only the member can see. They approve it in the Riot Mobile app, and Riot hands the bot a session. Nothing secret is typed into Discord, there is no web page and no open port, and it works with 2FA. Several open-source projects use this flow. A spike on the owner's account comes first, to check that the session works with the reauth in Auth flow and to log how long it lasts.
+**Onboarding: a Riot sign-in link.** `/link` gives the member a link to Riot's own sign-in page: the Riot Client's OAuth authorization-code flow, client `riot-client`, redirect `http://localhost/redirect`, scope `openid link ban lol_region account offline_access`.
+1. They sign in there, with 2FA if they use it. Their browser then lands on a dead `http://localhost/redirect?code=…` address, which they copy into a modal.
+2. The bot trades the one-time code (form-encoded `POST https://auth.riotgames.com/token`, `grant_type=authorization_code`) for an access token (1 hour), an ID token and a refresh token, and keeps only the refresh token.
+3. Each run trades the refresh token (`grant_type=refresh_token`) for fresh tokens, then runs E2 to E6 as for the owner.
 
-Ruled out: pasting a cookie into Discord (Discord can read message and modal contents, a modal input holds at most 4,000 characters, and Discord's developer policy says not to collect "passwords or other credentials"), and a web form behind the Cloudflare tunnel (TLS ends at Cloudflare, so Cloudflare could read the cookie).
+No cookie and no password is typed anywhere. The pasted code is single-use and expires within minutes. Discord's developer policy still asks bots not to collect login credentials; a short-lived, single-use code keeps that exposure small but does not remove it.
 
-**Not done yet:** `/link` and `/unlink`, the QR login, each member's own shop runs, wishlist and alerts, and encrypting members' sessions at rest with a key kept outside the data volume.
+Checked on 2026-11-24 on the owner's account with `scripts/code-spike.ts`: code exchange, one refresh, E2, E3, E4 and E6 (4 offers), same account as the cookie. The refresh token did not change on that refresh. Other projects report that Riot rotates it on every use and that two overlapping refreshes break the link, so the bot saves whatever token comes back before doing anything else, and the run lock keeps refreshes from overlapping. `invalid_grant` means the link is dead. How long a refresh token lives is not documented.
+
+Ruled out:
+- **Riot Mobile QR login.** Riot Mobile signed in an account run by a regional partner publisher, then failed fetching the partner's token and showed "We can't connect to the servers". A member with such an account can't approve a QR code.
+- **Pasting a cookie into Discord.** Discord can read message and modal contents, a modal input holds at most 4,000 characters, and the cookie is a long-lived key that gets around 2FA.
+- **A web form behind the Cloudflare tunnel.** TLS ends at Cloudflare, so Cloudflare could read what is sent.
+
+**Not done yet:** `/link` (the link and the modal) and `/unlink`, each member's own shop runs, wishlist and alerts, and encrypting refresh tokens at rest with a key kept outside the data volume.
 
 ## Error handling
 
