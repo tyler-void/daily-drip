@@ -240,6 +240,32 @@ Four spikes in `scripts/recap-spike.ts` come before any module. Each answers one
 - [ ] Logs contain no token, cookie or HenrikDev key.
 - [ ] Unit tests: the formulas on a fixture E11 and a fixture H2, team result incl. "Split", dedup and grouping, the roster rules, the budget.
 
+## Build status
+
+Built on `dev` and deployed with `RECAP=off` (2026-11-25). Unit tests cover the formulas on an E11 and an H2 fixture (both give identical numbers), the team result incl. split, dedup and grouping, the roster rules, the budget, the scheduler's timing and the `/recap` flows.
+
+| Module | Holds |
+| --- | --- |
+| `src/recap.ts` | E11 and H2 → `MatchRecap`, team result, ACS sort |
+| `src/riot/matches.ts` | E10–E12 with typed errors (`MatchNotReadyError` for E11's 404) |
+| `src/henrik.ts` | H1–H3, the 20-units-a-minute budget following HenrikDev's own window |
+| `src/roster.ts` | Roster entries and the consent rules |
+| `src/sessions.ts` | In-memory sessions, 50 min |
+| `src/recapScheduler.ts` | Presence and poll timers, the 04:00 sweep, per-source pauses |
+| `src/recapPoll.ts` | One poll: new matches, details, grouping, RR fill-in by edit (not in the module list above) |
+| `src/notify/recapMessage.ts` | The embed |
+| `src/recapCommands.ts` | `/recap` and the join confirmation |
+
+**Differences from the plan above**
+
+- **`RECAP=on|off`** (default off). With `on`, the bot asks for the Presence Intent; if Discord refuses it (close code 4014: not switched on in the Developer Portal), the bot logs how to fix it and starts without recaps, so the shop is never taken down.
+- **The shop's owner session is put in the recap cache** after each shop run, so the first recap poll of the day needs no extra sign-in.
+- **A followed friend's sweep checks only their newest match** (H2 `size=1`), not the last 5: bigger pages cost more HenrikDev units.
+- **RR still pending when the bot restarts is dropped:** the post stays as it is, with "…", because the recap is only kept in memory.
+- **`/recap trigger mode:`** lets someone without activity status switch to polling every 20 min.
+
+To turn recaps on: switch on the Presence Intent (Developer Portal → Bot → Privileged Gateway Intents), set `RECAP=on` in the server's `.env`, and redeploy. While on, the owner's presence changes are logged for S1.
+
 ## Unknowns & sources
 
 The design rests on five points nobody has checked yet; each has a spike.
