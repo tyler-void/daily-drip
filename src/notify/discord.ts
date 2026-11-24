@@ -37,7 +37,14 @@ export interface ShopHolder {
 export function shopMessage(snapshot: ShopSnapshot, holder?: ShopHolder): DiscordMessage {
   const resetsAt = Math.floor(Date.parse(snapshot.expiresAt) / 1000);
   const embeds = snapshot.offers.map((offer) => {
-    const embed = new EmbedBuilder().setTitle(offer.name).setDescription(offer.vp !== null ? `**${vp(offer.vp)}**` : "Price unknown");
+    const price = offer.vp !== null ? `**${vp(offer.vp)}**` : "Price unknown";
+    const links = offer.links;
+    // The title links to the collection's Fandom page; clicking the image always opens the image.
+    const linkLine = links
+      ? `\n[Fandom](${links.fandom}) · [Trailer](${links.trailer})${links.preview ? ` · [Preview](${links.preview})` : ""}`
+      : "";
+    const embed = new EmbedBuilder().setTitle(offer.name).setDescription(price + linkLine);
+    if (links) embed.setURL(links.fandom);
     if (offer.iconUrl) embed.setImage(offer.iconUrl);
     const color = offer.tier ? Number.parseInt(offer.tier.color, 16) : Number.NaN;
     if (offer.tier && Number.isFinite(color)) embed.setColor(color).setFooter({ text: offer.tier.name });

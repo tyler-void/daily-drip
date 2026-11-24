@@ -18,7 +18,9 @@ import {
   type Route,
   STOREFRONT_URL,
   storefrontBody,
+  themesData,
   tiersData,
+  VANDAL_VIDEO,
   versionRoute,
   weaponsData,
 } from "./fakes.ts";
@@ -40,7 +42,7 @@ describe("snapshotHash", () => {
   });
 });
 
-const catalog = (): Catalog => ({ schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "2026-11-01T00:00:00.000Z", ...buildCatalogEntries(weaponsData, tiersData), prices: null });
+const catalog = (): Catalog => ({ schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "2026-11-01T00:00:00.000Z", ...buildCatalogEntries(weaponsData, tiersData, themesData), prices: null, fandom: { Imperium: "Imperium Collection", Celestial: null } });
 
 describe("buildSnapshot", () => {
   const now = MIDNIGHT - 3_600_000;
@@ -56,13 +58,24 @@ describe("buildSnapshot", () => {
       iconUrl: "https://media.example/vandal-level1.png",
       vp: 2175,
       tier: { name: "Exclusive", color: "f5955b" },
+      links: {
+        fandom: "https://valorant.fandom.com/wiki/Imperium_Collection",
+        trailer: "https://www.youtube.com/results?search_query=VALORANT+Imperium+skins+trailer",
+        preview: VANDAL_VIDEO,
+      },
+    });
+    // No Fandom page and no video: a Fandom search, and no preview.
+    expect(snapshot.offers[1]?.links).toEqual({
+      fandom: "https://valorant.fandom.com/wiki/Special:Search?query=Celestial",
+      trailer: "https://www.youtube.com/results?search_query=VALORANT+Celestial+skins+trailer",
+      preview: null,
     });
     expect(snapshot.hash).toBe(snapshotHash([LEVEL_VANDAL, LEVEL_JUDGE], MIDNIGHT));
   });
 
   test("an item the catalog does not know shows its UUID and price", () => {
     const snapshot = buildSnapshot({ offers: [LEVEL_UNKNOWN], remainingSeconds: 60, prices: { [LEVEL_UNKNOWN]: 875 } }, catalog(), null, now);
-    expect(snapshot.offers[0]).toEqual({ levelUuid: LEVEL_UNKNOWN, name: LEVEL_UNKNOWN, iconUrl: null, vp: 875, tier: null });
+    expect(snapshot.offers[0]).toEqual({ levelUuid: LEVEL_UNKNOWN, name: LEVEL_UNKNOWN, iconUrl: null, vp: 875, tier: null, links: null });
   });
 
   test("without any catalog every item shows its UUID", () => {

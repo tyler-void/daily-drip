@@ -13,6 +13,7 @@ import {
   saveCatalog,
 } from "./catalog.ts";
 import type { Http } from "./http.ts";
+import { type OfferLinks, offerLinks } from "./links.ts";
 import { log } from "./log.ts";
 import { type AuthDeps, authenticate, type Session, UnexpectedResponseError } from "./riot/auth.ts";
 import { BadClaimsError, fetchOfferPrices, fetchStorefront, type Storefront } from "./riot/store.ts";
@@ -25,6 +26,8 @@ export interface ShopOffer {
   iconUrl: string | null;
   vp: number | null;
   tier: CatalogTier | null;
+  /** Fandom, trailer and preview links; absent for an unknown item and in snapshots saved before links. */
+  links?: OfferLinks | null;
 }
 
 export interface ShopSnapshot {
@@ -78,6 +81,7 @@ export function buildSnapshot(
       iconUrl: skin?.icon ?? null,
       vp: storefront.prices[levelUuid] ?? fallbackPrices?.[levelUuid] ?? null,
       tier,
+      links: skin?.collection ? offerLinks(skin.collection, skin.video ?? null, catalog?.fandom ?? null) : null,
     };
   });
   return {

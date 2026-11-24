@@ -14,15 +14,35 @@ import {
   TIERS_URL,
   VERSION_URL,
   WEAPONS_URL,
+  THEMES_URL,
 } from "../src/catalog.ts";
-import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, TIER_EXCLUSIVE, tiersData, versionRoute, weaponsData } from "./fakes.ts";
+import { FANDOM_API } from "../src/links.ts";
+import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO, versionRoute, weaponsData } from "./fakes.ts";
 
 describe("buildCatalogEntries", () => {
-  const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData);
+  const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData, themesData);
 
-  test("indexes every skin level by UUID, with the skin's name, weapon and tier", () => {
-    expect(skins[LEVEL_VANDAL]).toEqual({ name: "Imperium Vandal", weapon: "Vandal", icon: "https://media.example/vandal-level1.png", tier: TIER_EXCLUSIVE });
+  test("indexes every skin level by UUID, with the skin's name, weapon, tier, collection and video", () => {
+    expect(skins[LEVEL_VANDAL]).toEqual({
+      name: "Imperium Vandal",
+      weapon: "Vandal",
+      icon: "https://media.example/vandal-level1.png",
+      tier: TIER_EXCLUSIVE,
+      collection: "Imperium",
+      video: VANDAL_VIDEO,
+    });
     expect(skins[LEVEL_VANDAL_2]?.name).toBe("Imperium Vandal");
+  });
+
+  test("a level without a video uses the skin's first video; a skin without any has none", () => {
+    expect(skins[LEVEL_VANDAL_2]?.video).toBe(VANDAL_VIDEO);
+    expect(skins[LEVEL_JUDGE]?.video).toBeNull();
+    expect(skins[LEVEL_JUDGE]?.collection).toBe("Celestial");
+  });
+
+  test("a skin whose theme is unknown, or missing themes, has no collection", () => {
+    expect(skins[LEVEL_BULLDOG]?.collection).toBeNull();
+    expect(buildCatalogEntries(weaponsData, tiersData).skins[LEVEL_VANDAL]?.collection).toBeNull();
   });
 
   test("a level without an icon falls back to the skin's icon, then the first chroma's render", () => {
@@ -41,7 +61,7 @@ describe("buildCatalogEntries", () => {
 });
 
 test("storeSkins lists each store skin once with its weapon, and leaves out tierless ones", () => {
-  const catalog: Catalog = { schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "", ...buildCatalogEntries(weaponsData, tiersData), prices: null };
+  const catalog: Catalog = { schema: CATALOG_SCHEMA, gameVersion: GAME_VERSION, fetchedAt: "", ...buildCatalogEntries(weaponsData, tiersData), prices: null, fandom: null };
   expect(storeSkins(catalog)).toEqual([
     { name: "Araxys Bulldog", weapon: "Bulldog" },
     { name: "Celestial Judge", weapon: "Judge" },
@@ -66,11 +86,18 @@ const cachedCatalog = (version = GAME_VERSION): Catalog => ({
   fetchedAt: "2026-11-01T00:00:00.000Z",
   ...buildCatalogEntries(weaponsData, tiersData),
   prices: null,
+  fandom: null,
 });
+
+// One Fandom query for both store collections: Imperium has a page, Celestial doesn't.
+const FANDOM_QUERY = `${FANDOM_API}?${new URLSearchParams({ action: "query", format: "json", redirects: "1", titles: "Imperium Collection|Celestial Collection" })}`;
 
 const catalogRoutes = {
   [WEAPONS_URL]: () => Response.json({ status: 200, data: weaponsData }),
   [TIERS_URL]: () => Response.json({ status: 200, data: tiersData }),
+  [THEMES_URL]: () => Response.json({ status: 200, data: themesData }),
+  [FANDOM_QUERY]: () =>
+    Response.json({ query: { pages: { "1": { title: "Imperium Collection" }, "-1": { title: "Celestial Collection", missing: "" } } } }),
 };
 
 describe("refreshCatalog", () => {
@@ -81,11 +108,12 @@ describe("refreshCatalog", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("fetches E8 and E9 after a game patch and saves the new catalog", async () => {
+  test("fetches E8, E9 and the themes after a game patch, checks Fandom once, and saves the new catalog", async () => {
     const { http, urls } = fakeHttp(catalogRoutes);
     const patched = { ...GAME_VERSION, version: "13.11.00.1" };
     const catalog = await refreshCatalog(http, patched, cachedCatalog(), catalogFile);
-    expect(urls().sort()).toEqual([TIERS_URL, WEAPONS_URL]);
+    expect(urls().sort()).toEqual([FANDOM_QUERY, TIERS_URL, THEMES_URL, WEAPONS_URL].sort());
+    expect(catalog?.fandom).toEqual({ Imperium: "Imperium Collection", Celestial: null });
     expect(catalog?.gameVersion.version).toBe("13.11.00.1");
     expect(catalog?.prices).toBeNull();
     expect((await loadCatalog(catalogFile))?.gameVersion.version).toBe("13.11.00.1");

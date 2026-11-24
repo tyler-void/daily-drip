@@ -62,6 +62,14 @@ export const LEVEL_VANDAL_2 = "aaaaaaaa-0000-0000-0000-000000000002";
 export const LEVEL_JUDGE = "bbbbbbbb-0000-0000-0000-000000000001";
 export const LEVEL_BULLDOG = "cccccccc-0000-0000-0000-000000000001";
 export const LEVEL_UNKNOWN = "dddddddd-0000-0000-0000-000000000001";
+export const THEME_IMPERIUM = "11111111-0000-0000-0000-000000000001";
+export const THEME_CELESTIAL = "11111111-0000-0000-0000-000000000002";
+export const VANDAL_VIDEO = "https://video.example/imperium-vandal-level1.mp4";
+
+export const themesData = [
+  { uuid: THEME_IMPERIUM, displayName: "Imperium" },
+  { uuid: THEME_CELESTIAL, displayName: "Celestial" },
+];
 
 export const weaponsData = [
   {
@@ -70,10 +78,11 @@ export const weaponsData = [
       {
         displayName: "Imperium Vandal",
         contentTierUuid: TIER_EXCLUSIVE,
+        themeUuid: THEME_IMPERIUM,
         displayIcon: null,
         chromas: [{ fullRender: "https://media.example/vandal-chroma.png" }],
         levels: [
-          { uuid: LEVEL_VANDAL, displayName: "Imperium Vandal", displayIcon: "https://media.example/vandal-level1.png" },
+          { uuid: LEVEL_VANDAL, displayName: "Imperium Vandal", displayIcon: "https://media.example/vandal-level1.png", streamedVideo: VANDAL_VIDEO },
           { uuid: LEVEL_VANDAL_2, displayName: "Imperium Vandal Level 2", displayIcon: null },
         ],
       },
@@ -83,7 +92,7 @@ export const weaponsData = [
   {
     displayName: "Judge",
     skins: [
-      { displayName: "Celestial Judge", contentTierUuid: TIER_SELECT, displayIcon: "https://media.example/judge-skin.png", chromas: [], levels: [{ uuid: LEVEL_JUDGE, displayIcon: null }] },
+      { displayName: "Celestial Judge", contentTierUuid: TIER_SELECT, themeUuid: THEME_CELESTIAL, displayIcon: "https://media.example/judge-skin.png", chromas: [], levels: [{ uuid: LEVEL_JUDGE, displayIcon: null }] },
     ],
   },
   {

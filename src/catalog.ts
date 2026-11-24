@@ -6,15 +6,17 @@
 import { readFile } from "node:fs/promises";
 import { writeFileAtomic } from "./files.ts";
 import { type Http, NetworkError } from "./http.ts";
+import { type FandomTitles, resolveFandomTitles } from "./links.ts";
 import { log } from "./log.ts";
 import { UnexpectedResponseError } from "./riot/auth.ts";
 
 export const VERSION_URL = "https://valorant-api.com/v1/version";
 export const WEAPONS_URL = "https://valorant-api.com/v1/weapons";
 export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
+export const THEMES_URL = "https://valorant-api.com/v1/themes";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 2;
+export const CATALOG_SCHEMA = 3;
 
 export interface GameVersion {
   version: string;
@@ -28,6 +30,10 @@ export interface CatalogSkin {
   weapon: string;
   icon: string | null;
   tier: string | null;
+  /** The collection (valorant-api.com theme), e.g. "Reaver"; null when unknown. */
+  collection: string | null;
+  /** Riot's preview video for this level, or the first level of the skin that has one. */
+  video: string | null;
 }
 
 /** A store skin for /wishlist autocomplete. */
@@ -51,6 +57,8 @@ export interface Catalog {
   tiers: Record<string, CatalogTier>;
   /** E7 prices (offer ID -> VP), only filled if the storefront ever stops carrying prices. */
   prices: Record<string, number> | null;
+  /** Which collections have a Fandom page (src/links.ts); null if that check failed. */
+  fandom: FandomTitles | null;
 }
 
 export async function fetchGameVersion(http: Http): Promise<GameVersion> {
@@ -74,8 +82,14 @@ export async function resolveGameVersion(http: Http, cached: Catalog | null): Pr
   }
 }
 
-/** Turn E8 (weapons) and E9 (content tiers) into the lookup tables the snapshot needs. */
-export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Catalog, "skins" | "tiers"> {
+/** Turn E8 (weapons), E9 (content tiers) and the themes into the lookup tables the snapshot needs. */
+export function buildCatalogEntries(weapons: unknown, tiers: unknown, themes: unknown = []): Pick<Catalog, "skins" | "tiers"> {
+  const themeNames = new Map<string, string>();
+  for (const theme of asArray(themes)) {
+    const uuid = text(field(theme, "uuid"));
+    const name = text(field(theme, "displayName"));
+    if (uuid && name) themeNames.set(uuid, name);
+  }
   const skins: Record<string, CatalogSkin> = {};
   for (const weapon of asArray(weapons)) {
     const weaponName = text(field(weapon, "displayName")) ?? "Unknown";
@@ -85,9 +99,15 @@ export function buildCatalogEntries(weapons: unknown, tiers: unknown): Pick<Cata
       const tier = text(field(skin, "contentTierUuid"));
       const firstChroma = asArray(field(skin, "chromas"))[0];
       const skinIcon = text(field(skin, "displayIcon")) ?? text(field(firstChroma, "fullRender"));
-      for (const level of asArray(field(skin, "levels"))) {
+      const themeUuid = text(field(skin, "themeUuid"));
+      const collection = themeUuid ? (themeNames.get(themeUuid) ?? null) : null;
+      const levels = asArray(field(skin, "levels"));
+      const anyVideo = levels.map((l) => text(field(l, "streamedVideo"))).find((v) => v !== null) ?? null;
+      for (const level of levels) {
         const uuid = text(field(level, "uuid"));
-        if (uuid) skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier };
+        if (!uuid) continue;
+        const video = text(field(level, "streamedVideo")) ?? anyVideo;
+        skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier, collection, video };
       }
     }
   }
@@ -137,16 +157,25 @@ export async function refreshCatalog(
   const usable = cached?.schema === CATALOG_SCHEMA && Object.keys(cached.skins).length > 0;
   if (usable && cached.gameVersion.version === gameVersion.version) return cached;
   try {
-    const [weapons, tiers] = await Promise.all([
+    // Themes only add collection names (for the links); a failure there must not stop the shop.
+    const [weapons, tiers, themes] = await Promise.all([
       getJson(http, WEAPONS_URL, "E8 weapons", 30_000),
       getJson(http, TIERS_URL, "E9 content tiers"),
+      getJson(http, THEMES_URL, "themes").catch((err: unknown) => {
+        log.warn("could not fetch skin collections; shop posts go out without links", { error: err });
+        return { data: [] };
+      }),
     ]);
+    const entries = buildCatalogEntries(weapons.data, tiers.data, themes.data);
+    // Only collections of store skins: the daily shop never offers the others.
+    const collections = [...new Set(Object.values(entries.skins).flatMap((s) => (s.tier !== null && s.collection ? [s.collection] : [])))];
     const catalog: Catalog = {
       schema: CATALOG_SCHEMA,
       gameVersion,
       fetchedAt: new Date().toISOString(),
-      ...buildCatalogEntries(weapons.data, tiers.data),
+      ...entries,
       prices: null,
+      fandom: collections.length > 0 ? await resolveFandomTitles(http, collections) : null,
     };
     await saveCatalog(catalog, path);
     log.info("catalog refreshed", { version: gameVersion.version, skins: Object.keys(catalog.skins).length });

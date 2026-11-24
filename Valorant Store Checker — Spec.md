@@ -167,6 +167,11 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 **Messages (Discord).** Everyone's shop is public; wishlists are private.
 
 - Daily shop, in `DISCORD_CHANNEL_ID`: one message with 4 embeds per person, the owner and each linked member. Each embed has the skin name as title, the VP price, `displayIcon` as the image and the tier colour (E9) as its colour. The text is `<@person>'s daily shop (Name#Tag) · resets <t:{expiresAt}:R>`: it names whose shop it is by Discord mention and Riot ID (escaped, so a Riot ID can't change the formatting; left out while unknown) and pings them, and Discord shows the reset as a live countdown.
+- Links on each skin (`src/links.ts`). The skin name (embed title) links to its collection's Fandom wiki page, and a line under the price reads `Fandom · Trailer · Preview`. The image can't carry a link: clicking it always opens the image.
+  - Fandom: the page `<collection> Collection`. The collection is the skin's theme on valorant-api.com (`/v1/themes`). Which pages exist is checked once per game version with Fandom's MediaWiki API (50 titles per request, following redirects) and cached in `catalog.json`. A missing page, or a failed check, links to Fandom's search instead. On 2026-11-24, 1,148 of 1,396 store skins had a direct page.
+  - Trailer: a YouTube search for `VALORANT <collection> skins trailer`, so the query is visible and no API key is needed.
+  - Preview: Riot's own in-game preview video (`streamedVideo` of the offered level, or the skin's first level with one), when the skin has one; 585 of 1,396 store skins do. op.gg shows the same Riot videos and nothing for the rest, so it isn't used.
+  - Riot's site has no page per collection, so there is no Riot link.
 - Wishlist hit: a DM to that person, sent before their shop, naming the skin. A wishlist is private, so hits never go in the channel. If someone blocks DMs from server members, one note in the channel (once per process) asks them to allow them; it names no skin, and the shop is still posted.
 - Cookie dead: one message mentioning the owner, with the steps to grab a new cookie and overwrite the cookie file.
 - `lastSentHash` is written only after Discord accepts the message.

@@ -150,3 +150,31 @@ describe("createPersonNotifier", () => {
     expect(member.sent.map((m) => m.to)).toEqual([`dm:${PERSON}`]);
   });
 });
+
+describe("shopMessage links", () => {
+  const withLinks: ShopSnapshot = {
+    ...snapshot,
+    offers: [
+      { ...snapshot.offers[0]!, links: { fandom: "https://valorant.fandom.com/wiki/Imperium_Collection", trailer: "https://www.youtube.com/results?search_query=VALORANT+Imperium+skins+trailer", preview: "https://v.example/imperium.mp4" } },
+      { ...snapshot.offers[0]!, name: "Celestial Judge", links: { fandom: "https://valorant.fandom.com/wiki/Special:Search?query=Celestial", trailer: "https://www.youtube.com/results?search_query=VALORANT+Celestial+skins+trailer", preview: null } },
+      snapshot.offers[1]!,
+    ],
+  };
+  const embeds = shopMessage(withLinks).embeds;
+
+  test("the skin name links to Fandom, and the line under the price has Fandom, Trailer and Preview", () => {
+    expect(embeds[0]?.url).toBe("https://valorant.fandom.com/wiki/Imperium_Collection");
+    expect(embeds[0]?.description).toBe(
+      "**2,175 VP**\n[Fandom](https://valorant.fandom.com/wiki/Imperium_Collection) · [Trailer](https://www.youtube.com/results?search_query=VALORANT+Imperium+skins+trailer) · [Preview](https://v.example/imperium.mp4)",
+    );
+  });
+
+  test("no preview video: no Preview link", () => {
+    expect(embeds[1]?.description).not.toContain("Preview");
+    expect(embeds[1]?.description).toContain("[Trailer]");
+  });
+
+  test("an unknown item, or a snapshot saved before links, has no links at all", () => {
+    expect(embeds[2]).toEqual({ title: "b", description: "Price unknown" });
+  });
+});
