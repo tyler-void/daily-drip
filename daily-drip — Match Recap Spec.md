@@ -255,6 +255,7 @@ Built on `dev` and deployed with `RECAP=off` (2026-11-25). Unit tests cover the 
 | `src/recapScheduler.ts` | Presence and poll timers, the 04:00 sweep, per-source pauses |
 | `src/recapPoll.ts` | One poll: new matches, details, grouping, RR fill-in by edit (not in the module list above) |
 | `src/notify/recapMessage.ts` | The embed |
+| `src/notify/recapCard.ts` | The recap card image |
 | `src/recapCommands.ts` | `/recap` and the join confirmation |
 
 **Differences from the plan above**
@@ -264,6 +265,10 @@ Built on `dev` and deployed with `RECAP=off` (2026-11-25). Unit tests cover the 
 - **A followed friend's sweep checks only their newest match** (H2 `size=1`), not the last 5: bigger pages cost more HenrikDev units.
 - **RR still pending when the bot restarts is dropped:** the post stays as it is, with "…", because the recap is only kept in memory.
 - **`/recap trigger mode:`** lets someone without activity status switch to polling every 20 min.
+- **The recap card.** Each recap is posted as an image in the owner's Enhalation design (Catppuccin Mocha ground, glass panels, the peach→pink warm core for a win, one teal spark on the match's top ACS, grain; Bricolage Grotesque, Geist and Geist Mono, bundled in `fonts/` under the SIL Open Font License), with the map's splash and agent icons from valorant-api.com. Satori lays it out as SVG and resvg (WebAssembly) turns it into a PNG of about 1 MB, which the embed shows; the embed keeps the title, the pings and the footer. If the card can't be drawn within 30 s, the text recap above is posted instead. The container's memory limit went from 256 MB to 512 MB for it.
+- **Names.** Riot's match data (E11) leaves `gameName` blank in practice, so tracked players are named from the bot's own records (the roster, and the people `/recap show` knows), and everyone else by their agent, never by a piece of their PUUID.
+- **A linked person whose Riot sign-in has died** is read through HenrikDev by `/recap show` (no exact RR), and the bot logs who it was. Without HenrikDev, `/recap show` says their sign-in has run out and they can `/link` again.
+- **Sessions last 60 minutes (S4).** A session answered at 0, 30 and 55 minutes and was refused (`BAD_CLAIMS`) at 65, so the 50-minute cache stays.
 - **`/recap show player: match:`** posts a recap on demand (`src/recapLookup.ts`). `player` autocompletes from everyone the bot knows (linked and followed, labelled "Discord name (Riot ID)"), and also takes any Riot ID (`Name#TAG`, looked up through HenrikDev) or a Discord username the bot knows; empty means the person asking. `match` is 1 for the latest, up to 10. Linked people are read through their own session (exact RR); everyone else through HenrikDev. Public, like `/shop`, and it pings nobody.
 
 To turn recaps on: switch on the Presence Intent (Developer Portal → Bot → Privileged Gateway Intents), set `RECAP=on` in the server's `.env`, and redeploy. While on, the owner's presence changes are logged for S1.

@@ -19,6 +19,8 @@ export interface DiscordMessage {
   content: string;
   embeds: APIEmbed[];
   allowedMentions: MessageMentionOptions;
+  /** Attachments, e.g. the recap card; an embed shows one with image.url "attachment://<name>". */
+  files?: { attachment: Buffer; name: string }[];
 }
 
 const vp = (amount: number) => `${new Intl.NumberFormat("en-US").format(amount)} VP`;
@@ -167,7 +169,8 @@ export function createChannelPoster(client: Client, channelId: string) {
       return (await (await channel()).send(message)).id;
     },
     async edit(messageId: string, message: DiscordMessage): Promise<void> {
-      await (await channel()).messages.edit(messageId, message);
+      // With new files, replace the old attachments instead of adding to them.
+      await (await channel()).messages.edit(messageId, message.files ? { ...message, attachments: [] } : message);
     },
   };
 }

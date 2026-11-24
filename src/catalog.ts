@@ -19,7 +19,7 @@ export const AGENTS_URL = "https://valorant-api.com/v1/agents?isPlayableCharacte
 export const RANKS_URL = "https://valorant-api.com/v1/competitivetiers";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 7;
+export const CATALOG_SCHEMA = 8;
 
 export interface GameVersion {
   version: string;
@@ -53,6 +53,10 @@ export interface CatalogNames {
   agents: Record<string, string>;
   /** By competitiveTier number, from the newest episode's table: "Gold 2", "Unranked". */
   ranks: Record<string, string>;
+  /** Agent icon URL by lowercase agent UUID, for the recap card. */
+  agentIcons?: Record<string, string>;
+  /** Map splash URL, keyed like `maps`, for the recap card's backdrop. */
+  mapArt?: Record<string, string>;
 }
 
 /** A store skin for /wishlist autocomplete. */
@@ -252,19 +256,25 @@ function isThirdPartyOutage(err: unknown): boolean {
 
 /** valorant-api.com's maps, agents and competitive tiers -> the name tables recaps use. */
 export function buildNames(maps: unknown, agents: unknown, ranks: unknown): CatalogNames {
-  const names: CatalogNames = { maps: {}, agents: {}, ranks: {} };
+  const names: CatalogNames = { maps: {}, agents: {}, ranks: {}, agentIcons: {}, mapArt: {} };
   for (const map of asArray(maps)) {
     const name = text(field(map, "displayName"));
     if (!name) continue;
     const path = text(field(map, "mapUrl"));
     const uuid = text(field(map, "uuid"));
-    if (path) names.maps[path] = name;
-    if (uuid) names.maps[uuid.toLowerCase()] = name;
+    const art = text(field(map, "splash"));
+    for (const key of [path, uuid?.toLowerCase()]) {
+      if (!key) continue;
+      names.maps[key] = name;
+      if (art) (names.mapArt as Record<string, string>)[key] = art;
+    }
   }
   for (const agent of asArray(agents)) {
     const uuid = text(field(agent, "uuid"));
     const name = text(field(agent, "displayName"));
     if (uuid && name) names.agents[uuid.toLowerCase()] = name;
+    const icon = text(field(agent, "displayIconSmall")) ?? text(field(agent, "displayIcon"));
+    if (uuid && icon) (names.agentIcons as Record<string, string>)[uuid.toLowerCase()] = icon;
   }
   // The newest episode's table; tier numbers are stable across episodes, names are "IRON 1".
   const newest = asArray(ranks).at(-1);

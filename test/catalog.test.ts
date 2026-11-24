@@ -211,7 +211,7 @@ test("buildNames: maps by Riot path and by UUID, agents by UUID, ranks from the 
   expect(names.maps).toEqual({ "/Game/Maps/Ascent/Ascent": "Ascent", "7eaecc1b-4337-bbf6-6ab9-04b8f06b3319": "Ascent" });
   expect(names.agents).toEqual({ "add6443a-41bd-e414-f6ad-e58d267f4e95": "Jett" });
   expect(names.ranks).toEqual({ "0": "Unranked", "13": "Gold 2" });
-  expect(buildNames(null, {}, [])).toEqual({ maps: {}, agents: {}, ranks: {} });
+  expect(buildNames(null, {}, [])).toEqual({ maps: {}, agents: {}, ranks: {}, agentIcons: {}, mapArt: {} });
 });
 
 test("refreshCatalog: failing name lists leave names null and mark the catalog incomplete", async () => {

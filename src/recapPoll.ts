@@ -13,7 +13,7 @@
 import type { CatalogNames } from "./catalog.ts";
 import type { Henrik } from "./henrik.ts";
 import { log } from "./log.ts";
-import { type RrState, recapMessage } from "./notify/recapMessage.ts";
+import { type RecapInput, type RrState, recapMessage, withCard } from "./notify/recapMessage.ts";
 import type { DiscordMessage } from "./notify/discord.ts";
 import type { MatchRecap } from "./recap.ts";
 import type { Session } from "./riot/auth.ts";
@@ -48,6 +48,8 @@ export interface RecapPollDeps {
   /** Posts in the recap channel; returns the message ID. */
   post: (message: DiscordMessage) => Promise<string>;
   edit: (messageId: string, message: DiscordMessage) => Promise<void>;
+  /** Draws the recap card; null (or a failure) means the text recap goes out instead. */
+  card?: (input: RecapInput) => Promise<Uint8Array | null>;
   now?: () => number;
 }
 
@@ -61,6 +63,27 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
   const notReadySince = new Map<string, number>();
   /** Match ID -> the recap last posted, to rebuild the message when RR arrives. */
   const recaps = new Map<string, MatchRecap>();
+
+  /** The text recap, with the card image when it can be drawn. */
+  async function build(input: RecapInput): Promise<DiscordMessage> {
+    const message = recapMessage(input);
+    if (!deps.card) return message;
+    const png = await deps.card(input).catch((err: unknown) => {
+      log.warn("recap card failed; posting the text recap", { error: err });
+      return null;
+    });
+    return withCard(message, png);
+  }
+
+  /** The Riot ID the roster holds for each tracked PUUID. */
+  function riotNamesOf(puuids: string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const puuid of puuids) {
+      const name = findByPuuid(deps.recap.roster, puuid)?.riotName;
+      if (name) out[puuid] = name;
+    }
+    return out;
+  }
 
   /** The Discord user of each tracked PUUID, from the roster (the link between the two halves). */
   function discordIdsOf(puuids: string[]): Record<string, string> {
@@ -125,7 +148,7 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
     if (tracked.length === 0) return;
     for (const p of recap.players) if (tracked.includes(p.puuid)) refreshRiotName(roster, p.puuid, p.riotName);
     const rr = await collectRr(recap, tracked, now());
-    const message = recapMessage({ recap, tracked, rr, names: deps.names(), late, discordIds: discordIdsOf(tracked) });
+    const message = await build({ recap, tracked, rr, names: deps.names(), late, discordIds: discordIdsOf(tracked), riotNames: riotNamesOf(tracked) });
     const messageId = await deps.post(message);
     const posted: PostedMatch = {
       matchId: recap.matchId,
@@ -153,7 +176,7 @@ export function createRecapPoller(deps: RecapPollDeps): RecapPoller {
       const rr = await collectRr(recap, posted.tracked, Date.parse(posted.postedAt));
       const stillPending = Object.entries(rr).flatMap(([puuid, state]) => (state === "pending" ? [puuid] : []));
       if (stillPending.length === posted.rrPending.length) continue;
-      await deps.edit(posted.messageId, recapMessage({ recap, tracked: posted.tracked, rr, names: deps.names(), late: posted.late, discordIds: discordIdsOf(posted.tracked) }));
+      await deps.edit(posted.messageId, await build({ recap, tracked: posted.tracked, rr, names: deps.names(), late: posted.late, discordIds: discordIdsOf(posted.tracked), riotNames: riotNamesOf(posted.tracked) }));
       posted.rrPending = stillPending;
       await deps.save();
     }

@@ -31,6 +31,8 @@ export interface RecapInput {
   late?: boolean;
   /** PUUID -> Discord user ID of each tracked player: their mention, and who gets pinged. */
   discordIds?: Record<string, string>;
+  /** Riot IDs the bot knows (by PUUID), for players whose name the match data leaves blank. */
+  riotNames?: Record<string, string>;
 }
 
 export const COLOR = { win: 0x3ba55d, loss: 0xed4245, neutral: 0x99aab5 } as const;
@@ -66,7 +68,8 @@ export function recapMessage(input: RecapInput): DiscordMessage {
 
   const agent = (p: RecapPlayer) => names?.agents[p.agentId] ?? (p.agentId ? p.agentId.slice(0, 8) : "?");
   const rank = (tier: number) => names?.ranks[String(tier)] ?? `tier ${tier}`;
-  const gameName = (p: RecapPlayer) => (p.riotName ?? p.puuid.slice(0, 8)).split("#")[0] as string;
+  // Riot's match data can leave names blank; then the bot's own record, then the agent.
+  const gameName = (p: RecapPlayer) => (p.riotName ?? input.riotNames?.[p.puuid] ?? agent(p)).split("#")[0] as string;
 
   // One line per tracked player, highest ACS first.
   const trackedPlayers = recap.players.filter((p) => tracked.includes(p.puuid)).sort((a, b) => (b.acs ?? -1) - (a.acs ?? -1));
@@ -104,6 +107,22 @@ export function recapMessage(input: RecapInput): DiscordMessage {
   // Ping the tracked players who are mapped to a Discord user, and only them.
   const pinged = [...new Set(trackedPlayers.flatMap((p) => (input.discordIds?.[p.puuid] ? [input.discordIds[p.puuid] as string] : [])))];
   return { content: pinged.map((id) => `<@${id}>`).join(" "), embeds: [embed], allowedMentions: { users: pinged } };
+}
+
+export const CARD_FILE = "recap.png";
+
+/**
+ * The recap with its card image: the same text (pings) and title, the card as the embed's image,
+ * and the footer. Without a card, the text recap stays as it is.
+ */
+export function withCard(message: DiscordMessage, png: Uint8Array | null): DiscordMessage {
+  const embed = message.embeds[0];
+  if (!png || !embed) return message;
+  return {
+    ...message,
+    embeds: [{ title: embed.title, color: embed.color, image: { url: `attachment://${CARD_FILE}` }, footer: embed.footer, timestamp: embed.timestamp }],
+    files: [{ attachment: Buffer.from(png), name: CARD_FILE }],
+  };
 }
 
 function kda(p: RecapPlayer): string {

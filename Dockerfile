@@ -8,6 +8,8 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY src ./src
+# Fonts for the recap card (SIL Open Font License; the licenses are in the folder).
+COPY fonts ./fonts
 
 # A new named volume copies the ownership of the image directory it is mounted
 # over, so /app/data must belong to the bun user (uid 1000) before the first start.

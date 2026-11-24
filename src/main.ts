@@ -17,6 +17,8 @@ import { canStartLink, completeLink, fetchMemberShop, linkDeadText, type MemberD
 import { checkDiscordSetup, createChannelPoster, createPersonNotifier, DisallowedIntentsError, DiscordSetupError, startDiscord } from "./notify/discord.ts";
 import type { Notifier } from "./notify/notifier.ts";
 import { postShop } from "./post.ts";
+import { loadArt, renderRecapCard } from "./notify/recapCard.ts";
+import type { RecapInput } from "./notify/recapMessage.ts";
 import { createRecapCommands, listenForRecapCommands, recapCommand } from "./recapCommands.ts";
 import type { Person } from "./recapLookup.ts";
 import { createRecapPoller, type PdApi } from "./recapPoll.ts";
@@ -271,6 +273,17 @@ function startRecaps() {
     rr: async (s) => fetchRrUpdates(http, s, await clientVersion()),
   };
 
+  // The recap card: art from valorant-api.com, drawn with Satori and resvg. Bounded, so a slow
+  // render never holds a recap back for long; a failure falls back to the text recap.
+  const card = async (input: RecapInput): Promise<Uint8Array | null> => {
+    const render = (async () => {
+      const art = await loadArt(input.recap, input.names);
+      return (await renderRecapCard({ ...input, art, timeZone: process.env.TZ })).png;
+    })();
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 30_000));
+    return Promise.race([render, timeout]);
+  };
+
   const poller = createRecapPoller({
     recap: state.recap,
     save: () => saveState(state),
@@ -280,6 +293,7 @@ function startRecaps() {
     henrik,
     post: poster.post,
     edit: poster.edit,
+    card,
   });
   const scheduler = createRecapScheduler({
     entries: () => active(state.recap.roster),
@@ -319,6 +333,7 @@ function startRecaps() {
       people,
       lookup: { pd, henrik },
       names: () => catalog?.names ?? null,
+      card,
     }),
   );
 

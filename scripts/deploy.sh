@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 ssh "$host" "mkdir -p '$dest' '$dest/config' && chmod 750 '$dest' && chmod 700 '$dest/config'"
 
 # -rlt, not -a: keep the server's own owners and folder modes.
-rsync -rlt --delete src "$host:$dest/"
+rsync -rlt --delete src fonts "$host:$dest/"
 rsync -rlt Dockerfile .dockerignore compose.yaml package.json bun.lock .env.example "$host:$dest/"
 
 ssh "$host" "cd '$dest' && docker build -q -t daily-drip:local . >/dev/null && echo 'image built'"

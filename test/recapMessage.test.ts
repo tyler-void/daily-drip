@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { CatalogNames } from "../src/catalog.ts";
-import { COLOR, queueName, recapMessage } from "../src/notify/recapMessage.ts";
+import { CARD_FILE, COLOR, queueName, recapMessage, withCard } from "../src/notify/recapMessage.ts";
 import type { MatchRecap, RecapPlayer } from "../src/recap.ts";
 
 const JETT = "add6443a-41bd-e414-f6ad-e58d267f4e95";
@@ -129,4 +129,26 @@ test("without a mapping, nobody is pinged", () => {
   const message = recapMessage({ recap: recap(), tracked: ["p-tyler"], rr: {}, names });
   expect(message.content).toBe("");
   expect(message.allowedMentions).toEqual({ users: [] });
+});
+
+test("blank Riot names: the bot's own record, then the agent; never an ID fragment", () => {
+  const r = recap();
+  for (const p of r.players) p.riotName = null;
+  const embed = recapMessage({ recap: r, tracked: ["p-tyler", "p-friend"], rr: {}, names, riotNames: { "p-tyler": "Tyler#0001" } }).embeds[0]!;
+  expect(embed.description).toContain("**Tyler**");
+  expect(embed.description).toContain("**Sova**");
+  const boards = (embed.fields ?? []).map((f) => f.value).join("\n");
+  expect(boards).not.toContain("p-rando".slice(0, 8));
+  expect(boards).toContain("Jett");
+});
+
+test("withCard: the card becomes the embed's image, title, pings and footer stay; no card leaves the text recap", () => {
+  const text = recapMessage({ recap: recap(), tracked: ["p-tyler"], rr: {}, names, discordIds: { "p-tyler": "111" } });
+  expect(withCard(text, null)).toBe(text);
+  const card = withCard(text, new Uint8Array([137, 80, 78, 71]));
+  expect(card.files).toEqual([{ attachment: Buffer.from([137, 80, 78, 71]), name: CARD_FILE }]);
+  expect(card.embeds[0]).toMatchObject({ title: text.embeds[0]!.title, color: COLOR.win, image: { url: `attachment://${CARD_FILE}` }, footer: text.embeds[0]!.footer });
+  expect(card.embeds[0]!.fields).toBeUndefined();
+  expect(card.content).toBe(text.content);
+  expect(card.allowedMentions).toEqual(text.allowedMentions);
 });

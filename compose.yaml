@@ -38,7 +38,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    mem_limit: 256m
+    # The recap card is drawn in memory (Satori + resvg): 512 MB leaves it room.
+    mem_limit: 512m
     pids_limit: 128
     logging:
       driver: json-file
