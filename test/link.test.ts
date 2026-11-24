@@ -50,6 +50,7 @@ function interaction(userId: string, extra: Record<string, unknown> = {}) {
       deferReply: record("defer"),
       editReply: record("edit"),
       showModal: record("modal"),
+      followUp: record("followUp"),
       options: { getSubcommand: () => "", getString: () => null },
       fields: { getTextInputValue: (id: string) => (id === LINK_ADDRESS_FIELD ? PASTED : "") },
       ...extra,
@@ -223,4 +224,17 @@ test("/unlink confirms what was deleted, or says why not", async () => {
   const owner = interaction(OWNER);
   await handleUnlinkCommand(owner.interaction, deps({ unlink: async () => ({ ok: false, reason: "The owner's account is managed on the server" }) }));
   expect(owner.events[1]?.options.content).toBe("The owner's account is managed on the server");
+});
+
+test("/shop sends the preview videos as a follow-up, after the shop; none when no skin has one", async () => {
+  const withVideo = snapshot(["Ruyi Staff"]);
+  withVideo.offers[0]!.links = { fandom: "https://f.example", trailer: "https://y.example", preview: "https://v.example/ruyi.mp4" };
+  const { interaction: i, events } = interaction(OWNER);
+  await handleShopCommand(i, { ...deps({}), currentSnapshot: () => withVideo });
+  expect(events.map((e) => e.kind)).toEqual(["reply", "followUp"]);
+  expect(events[1]?.options.content).toBe("Ruyi Staff (fully upgraded)\nhttps://v.example/ruyi.mp4");
+
+  const plain = interaction(OWNER);
+  await handleShopCommand(plain.interaction, deps({}));
+  expect(plain.events.map((e) => e.kind)).toEqual(["reply"]);
 });

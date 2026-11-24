@@ -22,7 +22,7 @@ import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
 import { log, redact } from "./log.ts";
 import { linkDeadText } from "./members.ts";
-import { type DiscordMessage, shopMessage } from "./notify/discord.ts";
+import { type DiscordMessage, previewMessage, shopMessage } from "./notify/discord.ts";
 import { CookieDeadError } from "./riot/auth.ts";
 import { LoginDeadError } from "./riot/login.ts";
 import type { ShopSnapshot } from "./shop.ts";
@@ -137,6 +137,16 @@ export interface CommandInteraction {
   reply(options: Partial<DiscordMessage> & { flags?: number }): Promise<unknown>;
   deferReply(options?: { flags?: number }): Promise<unknown>;
   editReply(options: DiscordMessage): Promise<unknown>;
+  /** A second message after the reply: the preview videos. */
+  followUp?(options: DiscordMessage): Promise<unknown>;
+}
+
+/** The preview videos after a /shop reply, like after the daily post. Best-effort: the shop is already shown. */
+async function sendPreviews(interaction: CommandInteraction, snapshot: ShopSnapshot): Promise<void> {
+  const previews = previewMessage(snapshot);
+  if (previews && interaction.followUp) {
+    await interaction.followUp(previews).catch((err: unknown) => log.warn("could not post the preview videos", { error: err }));
+  }
 }
 
 export async function handleShopCommand(interaction: CommandInteraction, deps: CommandDeps): Promise<void> {
@@ -150,12 +160,15 @@ export async function handleShopCommand(interaction: CommandInteraction, deps: C
   const cached = liveSnapshot(shop, deps);
   if (cached) {
     await interaction.reply(shopMessage(cached, holder));
+    await sendPreviews(interaction, cached);
     return;
   }
   // A run takes a second or two; Discord wants an answer within 3 s, so defer first.
   await interaction.deferReply();
   try {
-    await interaction.editReply(shopMessage(await shop.runShop(), holder));
+    const fresh = await shop.runShop();
+    await interaction.editReply(shopMessage(fresh, holder));
+    await sendPreviews(interaction, fresh);
   } catch (err) {
     const text =
       err instanceof CookieDeadError
