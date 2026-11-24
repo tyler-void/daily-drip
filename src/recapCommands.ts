@@ -8,12 +8,17 @@
 //   /recap list                  the roster
 //   /recap trigger mode:         presence (default) or poll, for people without activity status
 //   /recap remove user:          owner only
+//   /recap show player: match:   a recap of anyone's recent match, on demand (1 = latest); the
+//                                player autocompletes from people the bot knows, or is a Riot ID
 //
 // Replies are private except /recap list. A join is announced in the channel.
 
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, type Client, escapeMarkdown, Events, MessageFlags, SlashCommandBuilder } from "discord.js";
+import { ActionRowBuilder, type APIEmbed, ButtonBuilder, ButtonStyle, type Client, escapeMarkdown, Events, MessageFlags, SlashCommandBuilder } from "discord.js";
+import type { CatalogNames } from "./catalog.ts";
 import type { Henrik, HenrikAccount } from "./henrik.ts";
 import { log, redact } from "./log.ts";
+import { recapMessage } from "./notify/recapMessage.ts";
+import { type LookupDeps, MAX_MATCH_NUMBER, nthMatch, type Person, playerChoices, resolvePlayer } from "./recapLookup.ts";
 import * as roster from "./roster.ts";
 
 export const JOIN_YES = "recap:join:yes";
@@ -47,6 +52,13 @@ export const recapCommand = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
+      .setName("show")
+      .setDescription("Recap of a recent match: yours, or anyone's")
+      .addStringOption((o) => o.setName("player").setDescription("Someone on the bot, a Discord username, or a Riot ID (Name#TAG); empty = you").setAutocomplete(true).setMaxLength(100))
+      .addIntegerOption((o) => o.setName("match").setDescription(`1 = latest, 2 = the one before, up to ${MAX_MATCH_NUMBER}`).setMinValue(1).setMaxValue(MAX_MATCH_NUMBER)),
+  )
+  .addSubcommand((s) =>
+    s
       .setName("remove")
       .setDescription("Owner only: remove someone's recaps")
       .addUserOption((o) => o.setName("user").setDescription("Whose recaps to remove").setRequired(true)),
@@ -64,17 +76,22 @@ export interface RecapCommandDeps {
   henrik: Henrik | null;
   /** A short note in the recap channel; pings nobody. */
   announce: (text: string) => Promise<void>;
+  /** Everyone the bot knows (linked and followed), for /recap show. */
+  people: () => Person[];
+  /** How /recap show fetches matches; null while recaps can't fetch anything. */
+  lookup: LookupDeps;
+  names: () => CatalogNames | null;
   now?: () => number;
 }
 
 export const JOIN_EXPLAINER =
   "**Before you join:** after each of your competitive, unrated and swiftplay matches, the bot posts a recap **in this server's channel**, for everyone to see: your result, agent, K/D/A, ACS, HS%, ADR and RR change, and the match scoreboard. It reads your public match data through HenrikDev; it never signs in as you. `/recap leave` stops it and deletes your entry.";
 
-type Reply = { content: string; flags?: number; components?: ActionRowBuilder<ButtonBuilder>[]; allowedMentions?: { parse: [] } };
+type Reply = { content: string; flags?: number; components?: ActionRowBuilder<ButtonBuilder>[]; embeds?: APIEmbed[]; allowedMentions?: { parse: [] } | { users: string[] } };
 
 export interface RecapInteraction {
   user: { id: string; username: string };
-  options: { getSubcommand(): string; getString(name: string): string | null; getUser(name: string): { id: string; username: string } | null };
+  options: { getSubcommand(): string; getString(name: string): string | null; getUser(name: string): { id: string; username: string } | null; getInteger(name: string): number | null };
   reply(options: Reply): Promise<unknown>;
   deferReply(options?: { flags?: number }): Promise<unknown>;
   editReply(options: Reply): Promise<unknown>;
@@ -142,6 +159,36 @@ export function createRecapCommands(deps: RecapCommandDeps) {
         await i.reply(priv(result.ok ? (result.value.deleted ? "Removed: their followed Riot ID is deleted." : "Their recaps are switched off; they can turn them back on.") : result.reason));
         return;
       }
+      case "show": {
+        // Public, like /shop; fetching takes longer than Discord's 3 s.
+        await i.deferReply();
+        const n = i.options.getInteger("match") ?? 1;
+        try {
+          const people = deps.people();
+          const target = await resolvePlayer(i.options.getString("player"), id, people, deps.henrik);
+          if (!target.ok) {
+            await i.editReply({ content: target.reason, allowedMentions: { parse: [] } });
+            return;
+          }
+          const found = await nthMatch(target.value, n, deps.lookup);
+          if (!found.ok) {
+            await i.editReply({ content: found.reason, allowedMentions: { parse: [] } });
+            return;
+          }
+          const { recap, puuid, rr } = found.value;
+          // The asked-for player, plus everyone else on the roster who was in that match.
+          const tracked = [...new Set([puuid, ...recap.players.filter((p) => roster.active(r).some((e) => e.puuid === p.puuid)).map((p) => p.puuid)])];
+          const discordIds = Object.fromEntries(people.filter((p) => recap.players.some((x) => x.puuid === p.puuid)).map((p) => [p.puuid, p.discordUserId]));
+          const message = recapMessage({ recap, tracked, rr, names: deps.names(), discordIds });
+          const who = target.value.kind === "person" ? (target.value.person.riotName ?? target.value.person.discordUsername ?? "their") : `${target.value.account.name}#${target.value.account.tag}`;
+          const which = n === 1 ? "latest match" : `match ${n} back`;
+          // On demand: mentions show names but ping nobody.
+          await i.editReply({ ...message, content: `**Recap** · ${escapeMarkdown(who)}'s ${which}`, allowedMentions: { parse: [] } });
+        } catch (err) {
+          await i.editReply({ content: redact(`Couldn't fetch that match: ${err instanceof Error ? err.message : String(err)}`), allowedMentions: { parse: [] } });
+        }
+        return;
+      }
       case "join": {
         if (!deps.henrik) {
           await i.reply(priv("Following a Riot ID isn't set up on this bot."));
@@ -199,13 +246,20 @@ export function createRecapCommands(deps: RecapCommandDeps) {
     log.info("a server member joined recaps", { member: b.user.username });
   }
 
-  return { command, button };
+  /** Autocomplete for /recap show's player: people the bot knows, and a typed Riot ID. */
+  async function autocomplete(a: { options: { getFocused(full: true): { name: string; value: string | number } }; respond(choices: { name: string; value: string }[]): Promise<unknown> }): Promise<void> {
+    const focused = a.options.getFocused(true);
+    await a.respond(focused.name === "player" ? playerChoices(deps.people(), String(focused.value)) : []);
+  }
+
+  return { command, button, autocomplete };
 }
 
 export function listenForRecapCommands(client: Client, handlers: ReturnType<typeof createRecapCommands>): void {
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      if (interaction.isChatInputCommand() && interaction.commandName === "recap") await handlers.command(interaction);
+      if (interaction.isAutocomplete() && interaction.commandName === "recap") await handlers.autocomplete(interaction);
+      else if (interaction.isChatInputCommand() && interaction.commandName === "recap") await handlers.command(interaction);
       else if (interaction.isButton() && (interaction.customId === JOIN_YES || interaction.customId === JOIN_NO)) await handlers.button(interaction);
     } catch (err) {
       log.error("recap command failed", { error: err });

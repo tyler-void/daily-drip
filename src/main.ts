@@ -18,6 +18,7 @@ import { checkDiscordSetup, createChannelPoster, createPersonNotifier, Disallowe
 import type { Notifier } from "./notify/notifier.ts";
 import { postShop } from "./post.ts";
 import { createRecapCommands, listenForRecapCommands, recapCommand } from "./recapCommands.ts";
+import type { Person } from "./recapLookup.ts";
 import { createRecapPoller, type PdApi } from "./recapPoll.ts";
 import { createRecapScheduler, isPlayingValorant } from "./recapScheduler.ts";
 import { authenticate } from "./riot/auth.ts";
@@ -286,6 +287,20 @@ function startRecaps() {
     poll: poller.poll,
   });
 
+  /** Everyone the bot knows, for /recap show: linked people (own session), then followed friends. */
+  const people = (): Person[] => {
+    const out: Person[] = [];
+    for (const a of Object.values(state.accounts)) {
+      const puuid = a.role === "owner" ? (a.puuid ?? state.puuid) : a.member ? a.puuid : null;
+      if (puuid) out.push({ discordUserId: a.discordUserId, discordUsername: a.discordUsername || null, riotName: a.riotName, puuid, linked: true, region: null });
+    }
+    for (const e of Object.values(state.recap.roster)) {
+      if (e.tier !== "followed" || out.some((p) => p.puuid === e.puuid)) continue;
+      out.push({ discordUserId: e.discordUserId, discordUsername: client.users.cache.get(e.discordUserId)?.username ?? null, riotName: e.riotName, puuid: e.puuid, linked: false, region: e.region });
+    }
+    return out;
+  };
+
   const standing = (userId: string): Standing => {
     if (userId === config.DISCORD_OWNER_ID) return { kind: "owner", puuid: state.puuid };
     const account = state.accounts[userId];
@@ -301,6 +316,9 @@ function startRecaps() {
       riotNameOf,
       henrik,
       announce: async (text) => void (await poster.post({ content: text, embeds: [], allowedMentions: { parse: [] } })),
+      people,
+      lookup: { pd, henrik },
+      names: () => catalog?.names ?? null,
     }),
   );
 

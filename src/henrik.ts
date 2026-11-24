@@ -48,6 +48,8 @@ export interface Henrik {
   account(riotId: string): Promise<HenrikAccount | null>;
   /** H2. The newest match, or null when the player has none. */
   newestMatch(region: string, puuid: string): Promise<MatchRecap | null>;
+  /** H2. The newest `size` matches (1-10), newest first. */
+  matches(region: string, puuid: string, size: number): Promise<MatchRecap[]>;
   /** H3. Newest first. */
   rrHistory(region: string, puuid: string): Promise<RrUpdate[]>;
 }
@@ -113,6 +115,14 @@ export function createHenrik(deps: HenrikDeps): Henrik {
     }
   }
 
+  async function matches(region: string, puuid: string, size: number): Promise<MatchRecap[]> {
+    const n = Math.min(10, Math.max(1, Math.floor(size)));
+    const { status, body } = await get(`/valorant/v4/by-puuid/matches/${encodeURIComponent(region)}/pc/${encodeURIComponent(puuid)}?size=${n}`, "H2 matches");
+    if (status === 404) return [];
+    if (status !== 200 || !Array.isArray(body?.data)) throw new UnexpectedResponseError(`H2 matches returned ${status}`);
+    return body.data.flatMap((m: unknown) => recapFromHenrikMatch(m) ?? []);
+  }
+
   return {
     async account(riotId) {
       const [name, tag] = splitRiotId(riotId);
@@ -130,12 +140,10 @@ export function createHenrik(deps: HenrikDeps): Henrik {
     },
 
     async newestMatch(region, puuid) {
-      const { status, body } = await get(`/valorant/v4/by-puuid/matches/${encodeURIComponent(region)}/pc/${encodeURIComponent(puuid)}?size=1`, "H2 matches");
-      if (status === 404) return null;
-      if (status !== 200 || !Array.isArray(body?.data)) throw new UnexpectedResponseError(`H2 matches returned ${status}`);
-      const first = body.data[0];
-      return first ? recapFromHenrikMatch(first) : null;
+      return (await matches(region, puuid, 1))[0] ?? null;
     },
+
+    matches,
 
     async rrHistory(region, puuid) {
       const { status, body } = await get(`/valorant/v2/by-puuid/mmr-history/${encodeURIComponent(region)}/pc/${encodeURIComponent(puuid)}`, "H3 mmr history");

@@ -181,6 +181,7 @@ test("a followed friend goes through HenrikDev, RR from their MMR history", asyn
   const henrik: Henrik = {
     account: async () => null,
     newestMatch: async () => m,
+    matches: async () => [m],
     rrHistory: async () => [rrUpdate("m-9", 15)],
   };
   const x = setup(roster, null, henrik);

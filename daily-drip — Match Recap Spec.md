@@ -263,6 +263,7 @@ Built on `dev` and deployed with `RECAP=off` (2026-11-25). Unit tests cover the 
 - **A followed friend's sweep checks only their newest match** (H2 `size=1`), not the last 5: bigger pages cost more HenrikDev units.
 - **RR still pending when the bot restarts is dropped:** the post stays as it is, with "…", because the recap is only kept in memory.
 - **`/recap trigger mode:`** lets someone without activity status switch to polling every 20 min.
+- **`/recap show player: match:`** posts a recap on demand (`src/recapLookup.ts`). `player` autocompletes from everyone the bot knows (linked and followed, labelled "Discord name (Riot ID)"), and also takes any Riot ID (`Name#TAG`, looked up through HenrikDev) or a Discord username the bot knows; empty means the person asking. `match` is 1 for the latest, up to 10. Linked people are read through their own session (exact RR); everyone else through HenrikDev. Public, like `/shop`, and it pings nobody.
 
 To turn recaps on: switch on the Presence Intent (Developer Portal → Bot → Privileged Gateway Intents), set `RECAP=on` in the server's `.env`, and redeploy. While on, the owner's presence changes are logged for S1.
 
