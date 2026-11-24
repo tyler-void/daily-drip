@@ -16,6 +16,7 @@
 import { ActionRowBuilder, type APIEmbed, ButtonBuilder, ButtonStyle, type Client, escapeMarkdown, Events, MessageFlags, SlashCommandBuilder } from "discord.js";
 import type { CatalogNames } from "./catalog.ts";
 import type { Henrik, HenrikAccount } from "./henrik.ts";
+import { track } from "./inflight.ts";
 import { log, redact } from "./log.ts";
 import { LoginDeadError } from "./riot/login.ts";
 import { type RecapInput, recapMessage, withCard } from "./notify/recapMessage.ts";
@@ -267,7 +268,9 @@ export function createRecapCommands(deps: RecapCommandDeps) {
 }
 
 export function listenForRecapCommands(client: Client, handlers: ReturnType<typeof createRecapCommands>): void {
-  client.on(Events.InteractionCreate, async (interaction) => {
+  // Tracked, so a shutdown waits for commands still being answered (src/inflight.ts).
+  client.on(Events.InteractionCreate, (interaction) =>
+    void track(async () => {
     try {
       if (interaction.isAutocomplete() && interaction.commandName === "recap") await handlers.autocomplete(interaction);
       else if (interaction.isChatInputCommand() && interaction.commandName === "recap") await handlers.command(interaction);
@@ -275,5 +278,6 @@ export function listenForRecapCommands(client: Client, handlers: ReturnType<type
     } catch (err) {
       log.error("recap command failed", { error: err });
     }
-  });
+    }),
+  );
 }

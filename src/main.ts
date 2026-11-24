@@ -6,6 +6,7 @@
 import { ensureOwner, type LinkedAccount, members, removeMember } from "./accounts.ts";
 import { fetchGameVersion, loadCatalog, storeSkins } from "./catalog.ts";
 import { listenForCommands, type MemberCommands, registerCommands } from "./commands.ts";
+import { drain, inFlight } from "./inflight.ts";
 import { loadConfig } from "./config.ts";
 import { createHttp } from "./http.ts";
 import { createLock } from "./lock.ts";
@@ -363,13 +364,22 @@ log.info("running; press Ctrl+C to stop", {
   recaps: recapOn ? `on (${active(state.recap.roster).length} on the roster)` : "off",
 });
 
-// Docker stops containers with SIGTERM; close the gateway connection cleanly.
+// Docker stops containers with SIGTERM (compose gives 40 s). Stop the timers, let slash commands
+// still being answered finish (up to 25 s), then close the gateway connection cleanly.
+let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    log.info(`${signal}: shutting down`);
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info(`${signal}: shutting down`, { commandsInFlight: inFlight() });
     scheduler.stop();
     memberScheduler?.stop();
     recapScheduler?.stop();
-    void client.destroy().finally(() => process.exit(0));
+    void drain(25_000)
+      .then((finished) => {
+        if (!finished) log.warn("shutting down with commands still unanswered", { commandsInFlight: inFlight() });
+      })
+      .then(() => client.destroy())
+      .finally(() => process.exit(0));
   });
 }

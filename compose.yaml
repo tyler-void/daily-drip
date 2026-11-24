@@ -13,6 +13,8 @@ services:
     image: daily-drip:local
     container_name: daily-drip
     restart: unless-stopped
+    # Room for slash commands still being answered to finish on a redeploy (the bot waits up to 25 s).
+    stop_grace_period: 40s
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?set DISCORD_GUILD_ID in .env}

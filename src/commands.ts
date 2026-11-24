@@ -22,6 +22,7 @@ import type { Result } from "./accounts.ts";
 import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
 import { helpCommand, helpEmbed, type HelpInfo } from "./help.ts";
+import { track } from "./inflight.ts";
 import { log, redact } from "./log.ts";
 import { linkDeadText } from "./members.ts";
 import { type DiscordMessage, previewMessage, shopMessage, skinCardMessage } from "./notify/discord.ts";
@@ -504,7 +505,9 @@ export async function handleHelpCommand(interaction: ChatInputCommandInteraction
 
 // ---------- wiring ----------
 export function listenForCommands(client: Client, deps: CommandDeps): void {
-  client.on(Events.InteractionCreate, async (interaction) => {
+  // Tracked, so a shutdown waits for commands still being answered (src/inflight.ts).
+  client.on(Events.InteractionCreate, (interaction) =>
+    void track(async () => {
     try {
       if (interaction.isAutocomplete()) {
         if (interaction.commandName === "wishlist") await handleWishlistAutocomplete(interaction, deps);
@@ -530,7 +533,8 @@ export function listenForCommands(client: Client, deps: CommandDeps): void {
       // Error messages only: never the interaction, which can hold a pasted sign-in address.
       log.error("command failed", { error: err });
     }
-  });
+    }),
+  );
 }
 
 function liveSnapshot(shop: UserShop, deps: CommandDeps): ShopSnapshot | null {
