@@ -1,6 +1,8 @@
 // A fake Riot + valorant-api.com for tests, with synthetic data (no real tokens or account data).
 
+import { THEMES_URL } from "../src/catalog.ts";
 import type { Http, RequestOptions } from "../src/http.ts";
+import { FANDOM_API } from "../src/links.ts";
 import { ENTITLEMENTS_URL, PAS_URL, REAUTH_URL, USERINFO_URL } from "../src/riot/auth.ts";
 import { VP } from "../src/riot/store.ts";
 
@@ -124,5 +126,16 @@ export function storefrontBody(offers: string[], prices: Record<string, number> 
       SingleItemStoreOffers: Object.entries(prices).map(([id, vp]) => ({ OfferID: id, Cost: { [VP]: vp } })),
     },
     AccessoryStore: {},
+  };
+}
+
+/** The themes and the Fandom check, for a complete catalog: Imperium has a Fandom page, Celestial doesn't. */
+export const FANDOM_QUERY_URL = `${FANDOM_API}?${new URLSearchParams({ action: "query", format: "json", redirects: "1", titles: "Imperium Collection|Celestial Collection" })}`;
+
+export function linkRoutes(): Record<string, Route> {
+  return {
+    [THEMES_URL]: () => Response.json({ status: 200, data: themesData }),
+    [FANDOM_QUERY_URL]: () =>
+      Response.json({ query: { pages: { "1": { title: "Imperium Collection" }, "-1": { title: "Celestial Collection", missing: "" } } } }),
   };
 }

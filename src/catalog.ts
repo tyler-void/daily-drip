@@ -16,7 +16,7 @@ export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
 export const THEMES_URL = "https://valorant-api.com/v1/themes";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 5;
+export const CATALOG_SCHEMA = 6;
 
 export interface GameVersion {
   version: string;
@@ -65,6 +65,11 @@ export interface Catalog {
   prices: Record<string, number> | null;
   /** Which collections have a Fandom page (src/links.ts); null if that check failed. */
   fandom: FandomTitles | null;
+  /**
+   * The themes or the Fandom check failed while building this catalog, so it lacks collections or
+   * Fandom pages. It is used, but rebuilt on the next run instead of being kept for the whole version.
+   */
+  incomplete?: boolean;
 }
 
 export async function fetchGameVersion(http: Http): Promise<GameVersion> {
@@ -171,27 +176,30 @@ export async function refreshCatalog(
   path = DEFAULT_CATALOG_FILE,
 ): Promise<Catalog | null> {
   const usable = cached?.schema === CATALOG_SCHEMA && Object.keys(cached.skins).length > 0;
-  if (usable && cached.gameVersion.version === gameVersion.version) return cached;
+  if (usable && cached.gameVersion.version === gameVersion.version && !cached.incomplete) return cached;
   try {
     // Themes only add collection names (for the links); a failure there must not stop the shop.
     const [weapons, tiers, themes] = await Promise.all([
       getJson(http, WEAPONS_URL, "E8 weapons", 30_000),
       getJson(http, TIERS_URL, "E9 content tiers"),
-      getJson(http, THEMES_URL, "themes").catch((err: unknown) => {
-        log.warn("could not fetch skin collections; shop posts go out without links", { error: err });
-        return { data: [] };
+      getJson(http, THEMES_URL, "themes", 30_000).catch((err: unknown) => {
+        log.warn("could not fetch skin collections; shop posts go out without links until the next run", { error: err });
+        return { data: null };
       }),
     ]);
     const entries = buildCatalogEntries(weapons.data, tiers.data, themes.data);
     // Only collections of store skins: the daily shop never offers the others.
     const collections = [...new Set(Object.values(entries.skins).flatMap((s) => (s.tier !== null && s.collection ? [s.collection] : [])))];
+    const fandom = collections.length > 0 ? await resolveFandomTitles(http, collections) : null;
     const catalog: Catalog = {
       schema: CATALOG_SCHEMA,
       gameVersion,
       fetchedAt: new Date().toISOString(),
       ...entries,
       prices: null,
-      fandom: collections.length > 0 ? await resolveFandomTitles(http, collections) : null,
+      fandom,
+      // Retry next run rather than keep a catalog without links for the whole game version.
+      incomplete: themes.data === null || fandom === null,
     };
     await saveCatalog(catalog, path);
     log.info("catalog refreshed", { version: gameVersion.version, skins: Object.keys(catalog.skins).length });

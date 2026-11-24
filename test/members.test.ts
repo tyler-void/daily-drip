@@ -8,7 +8,7 @@ import { canStartLink, completeLink, fetchMemberShop, type MemberDeps, PASTE_HEL
 import { PAS_URL, USERINFO_URL } from "../src/riot/auth.ts";
 import { LoginDeadError, TOKEN_URL } from "../src/riot/login.ts";
 import { importKey, open } from "../src/secretbox.ts";
-import { fakeRiot, LEVEL_JUDGE, LEVEL_VANDAL, PUUID, type Route, STOREFRONT_URL, storefrontBody, tiersData, versionRoute, weaponsData } from "./fakes.ts";
+import { fakeRiot, linkRoutes, LEVEL_JUDGE, LEVEL_VANDAL, PUUID, type Route, STOREFRONT_URL, storefrontBody, tiersData, versionRoute, weaponsData } from "./fakes.ts";
 
 const OWNER = "100000000000000001";
 const FRIEND = "200000000000000002";
@@ -46,6 +46,7 @@ function riot(overrides: Record<string, Route> = {}) {
     [STOREFRONT_URL]: () => Response.json(storefrontBody([LEVEL_VANDAL, LEVEL_JUDGE], { [LEVEL_VANDAL]: 2175, [LEVEL_JUDGE]: 1775 })),
     [WEAPONS_URL]: () => Response.json({ status: 200, data: weaponsData }),
     [TIERS_URL]: () => Response.json({ status: 200, data: tiersData }),
+    ...linkRoutes(),
     ...overrides,
   });
 }

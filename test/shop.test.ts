@@ -15,6 +15,7 @@ import {
   LEVEL_UNKNOWN,
   LEVEL_VANDAL,
   LEVEL_VANDAL_2,
+  linkRoutes,
   OFFERS_URL,
   type Route,
   STOREFRONT_URL,
@@ -114,6 +115,7 @@ function shopRiot(overrides: Record<string, Route> = {}) {
     [STOREFRONT_URL]: () => Response.json(storefrontBody(OFFERS, PRICES)),
     [WEAPONS_URL]: () => Response.json({ status: 200, data: weaponsData }),
     [TIERS_URL]: () => Response.json({ status: 200, data: tiersData }),
+    ...linkRoutes(),
     ...overrides,
   });
 }

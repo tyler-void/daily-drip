@@ -168,3 +168,33 @@ test("levelItemName turns Riot's upgrade names into words", () => {
   expect(levelItemName("EEquippableSkinLevelItem::HeartbeatAndMapSensor")).toBe("Heartbeat and map sensor");
   expect(levelItemName(null)).toBeNull();
 });
+
+describe("refreshCatalog when the themes or Fandom fail", () => {
+  test("the catalog is used but marked incomplete, and the next run builds it again", async () => {
+    const { http } = fakeHttp({ ...catalogRoutes, [THEMES_URL]: () => new Response("timeout", { status: 504 }) });
+    const first = await refreshCatalog(http, GAME_VERSION, null, catalogFile);
+    expect(first?.incomplete).toBe(true);
+    expect(Object.values(first?.skins ?? {}).every((s) => s.collection === null)).toBe(true);
+
+    const second = fakeHttp(catalogRoutes);
+    const rebuilt = await refreshCatalog(second.http, GAME_VERSION, first, catalogFile);
+    expect(second.urls()).toContain(WEAPONS_URL);
+    expect(rebuilt?.incomplete).toBe(false);
+    expect(rebuilt?.skins[LEVEL_VANDAL]?.collection).toBe("Imperium");
+  });
+
+  test("a failed Fandom check also marks it incomplete", async () => {
+    const { http } = fakeHttp({ ...catalogRoutes, [FANDOM_QUERY]: () => new Response("blocked", { status: 403 }) });
+    const catalog = await refreshCatalog(http, GAME_VERSION, null, catalogFile);
+    expect(catalog?.fandom).toBeNull();
+    expect(catalog?.incomplete).toBe(true);
+  });
+
+  test("a complete catalog is kept for the game version", async () => {
+    const built = await refreshCatalog(fakeHttp(catalogRoutes).http, GAME_VERSION, null, catalogFile);
+    expect(built?.incomplete).toBe(false);
+    const again = fakeHttp(catalogRoutes);
+    expect(await refreshCatalog(again.http, GAME_VERSION, built, catalogFile)).toBe(built);
+    expect(again.calls).toHaveLength(0);
+  });
+});
