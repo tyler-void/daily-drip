@@ -32,6 +32,7 @@ test("ensureOwner adds the owner once, with the owner role and the existing PUUI
     riotName: null,
     linkedAt: T0.toISOString(),
     role: "owner",
+    member: null,
   });
   // A second start with nothing new changes nothing, so it needs no save.
   expect(ensureOwner(reg, owner("puuid-owner"), T0)).toBe(false);

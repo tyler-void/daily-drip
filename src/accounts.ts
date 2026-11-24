@@ -1,12 +1,30 @@
 // The account registry: which Discord users may use the bot, and which Riot account each one
-// has linked. Identity only. The cookies, shop snapshot and wishlist of a running account
-// live elsewhere. One Riot account per Discord user, and one Discord user per Riot account.
+// has linked. One Riot account per Discord user, and one Discord user per Riot account.
 //
 // The link has two stable halves:
 //   Discord side: the user id (the key). The username is kept for display; it can change.
 //   Riot side:    the PUUID, once a login has succeeded. The Riot ID is kept for display.
+//
+// A member's sign-in (sealed refresh token) and shop state live on their entry, so removing the
+// entry removes everything the bot holds about them. The owner's shop state is still the top-level
+// state (cookie file), so the owner's entry has `member: null`.
+
+import type { ShopSnapshot } from "./shop.ts";
 
 export type AccountRole = "owner" | "member";
+
+/** What the bot keeps to run a member's shop. Set when their link completes. */
+export interface MemberRuntime {
+  /** The Riot refresh token, sealed with TOKEN_KEY (src/secretbox.ts). Never stored in clear. */
+  sealedRefreshToken: string;
+  shard: string | null;
+  snapshot: ShopSnapshot | null;
+  wishlist: string[];
+  lastSentHash: string | null;
+  lastSuccessAt: string | null;
+  /** The "link again" message went out; cleared by a successful run or a new link. */
+  linkDeadNotified: boolean;
+}
 
 export interface LinkedAccount {
   /** The Discord user id. Also the key in the registry. */
@@ -21,6 +39,8 @@ export interface LinkedAccount {
   linkedAt: string;
   /** The owner is added on every start; everyone else is a member. */
   role: AccountRole;
+  /** A member's sign-in and shop state; null for the owner and before a member's link completes. */
+  member: MemberRuntime | null;
 }
 
 export type AccountRegistry = Record<string, LinkedAccount>;
@@ -51,6 +71,7 @@ export function ensureOwner(
       riotName: null,
       linkedAt: now.toISOString(),
       role: "owner",
+      member: null,
     };
     return true;
   }
@@ -91,6 +112,7 @@ export function addMember(
     riotName: null,
     linkedAt: now.toISOString(),
     role: "member",
+    member: null,
   };
   registry[member.discordUserId] = account;
   return { ok: true, value: account };
