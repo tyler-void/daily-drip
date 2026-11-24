@@ -17,10 +17,11 @@ After every shop reset, a Discord bot on `home-server` fetches the owner's 4 dai
 **After MVP**
 
 - Night Market, Accessory store, featured bundle.
+- Other members of the private server, each with their own Riot account (Accounts, in progress).
 
 **Non-goals**
 
-- Multiple users: one account, the owner's.
+- Public use: the bot serves a few people in one private server, never anyone who asks.
 - Username/password login: that flow is behind hCaptcha.
 - Purchases or any write request to Riot.
 - Touching the game client.
@@ -187,6 +188,27 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 
 Put every channel behind `interface Notifier { sendShop(snapshot, wishlistHits); sendAlert(text) }` so Telegram or ntfy can be added later without touching the core. Slash commands are Discord-only and live outside the interface.
 
+## Accounts (multi-user, in progress)
+
+Besides the owner, up to 10 members of the private server can link their own Riot account. The owner keeps using the cookie file. Members never send a cookie or a password.
+
+**Registry** (`src/accounts.ts`, stored in `state.json` under `accounts`): one entry per Discord user, keyed by the user id. It is the link between the two sides:
+
+| Side | Stable key | Kept for display |
+| --- | --- | --- |
+| Discord | User id | Username, from the link or the last one seen |
+| Riot | PUUID, once a login has succeeded | Riot ID (`gameName#tagLine`) |
+
+- One Riot account per Discord user, and one Discord user per Riot account. Two entries for one account would split its cookie rotation, and one copy would die.
+- The owner is added on every start, with the owner role, and can't be removed with a command.
+- At most 10 members. Riot rate-limits an IP when many accounts sign in close together ([SkinPeek admin guide](https://github.com/giorgi-o/SkinPeek/wiki/SkinPeek-Admin-Guide)), and every member is someone whose account access the server holds.
+
+**Onboarding (planned): Riot Mobile QR login.** `/link` shows a QR code that only the member can see. They approve it in the Riot Mobile app, and Riot hands the bot a session. Nothing secret is typed into Discord, there is no web page and no open port, and it works with 2FA. Several open-source projects use this flow. A spike on the owner's account comes first, to check that the session works with the reauth in Auth flow and to log how long it lasts.
+
+Ruled out: pasting a cookie into Discord (Discord can read message and modal contents, a modal input holds at most 4,000 characters, and Discord's developer policy says not to collect "passwords or other credentials"), and a web form behind the Cloudflare tunnel (TLS ends at Cloudflare, so Cloudflare could read the cookie).
+
+**Not done yet:** `/link` and `/unlink`, the QR login, each member's own shop runs, wishlist and alerts, and encrypting members' sessions at rest with a key kept outside the data volume.
+
 ## Error handling
 
 Every failure ends in a bounded retry or a single alert, never a tight loop. Detection rules come from SkinPeek (`detectCloudflareBlock`, `BAD_CLAIMS`, `isMaintenance`); cookie-death causes and the hourly 429 retry come from the Storefront README.
@@ -303,7 +325,8 @@ The main risk is that Riot changes these internal endpoints without notice, as i
 
 **Risks**
 
-- Account action: Riot has made no official statement about store checkers. The requests are read-only and identical to the client's, so the risk is judged low (inferred).
+- Account action: Riot's VALORANT developer policy lists "online store tracking" as an unapproved use case ([Riot](https://support-developer.riotgames.com/hc/en-us/articles/22698769097107-VALORANT)), and its Terms of Service forbid letting anyone else access an account. No ban caused by a store checker has been confirmed. The requests are read-only and identical to the client's, so the risk for the owner's own account is judged low (inferred).
+- Serving members raises that risk: the server then holds other people's account access, and the bot becomes a service for others rather than a personal tool. Keep it to a few people in one private server (Accounts).
 - A leaked cookie = a compromised account, with 2FA bypassed. That is why it stays on the box only.
 - The references age: SkinPeek has been archived since 2025-06-04, and its User-Agent is a 2023 workaround (Endpoints, User-Agent).
 

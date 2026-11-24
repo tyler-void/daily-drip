@@ -1,6 +1,7 @@
 // data/state.json (spec: Storage & secrets). Mode 0600, written atomically via temp file + rename.
 
 import { readFile, rename } from "node:fs/promises";
+import type { AccountRegistry } from "./accounts.ts";
 import type { CookieJar } from "./cookies.ts";
 import { errorCode, writeFileAtomic } from "./files.ts";
 import { log } from "./log.ts";
@@ -20,6 +21,8 @@ export interface State {
   lastSuccessAt: string | null;
   /** One per alert, so each is sent once; a successful run clears them all. */
   flags: AlertFlags;
+  /** Who may use the bot, and which Riot account each Discord user linked. Keyed by Discord user id. */
+  accounts: AccountRegistry;
 }
 
 export interface AlertFlags {
@@ -45,6 +48,7 @@ export function emptyState(): State {
     lastSentHash: null,
     lastSuccessAt: null,
     flags: noAlerts(),
+    accounts: {},
   };
 }
 
@@ -59,7 +63,8 @@ export async function loadState(path = DEFAULT_STATE_FILE): Promise<State> {
   try {
     const saved = JSON.parse(raw) as Partial<State>;
     const empty = emptyState();
-    return { ...empty, ...saved, flags: { ...empty.flags, ...saved.flags } };
+    // A state file from before the registry has no `accounts`; it starts empty and main adds the owner.
+    return { ...empty, ...saved, flags: { ...empty.flags, ...saved.flags }, accounts: { ...saved.accounts } };
   } catch {
     // Atomic writes make this unlikely. Keep the bad file for inspection and fall back to the cookie file.
     const aside = `${path}.corrupt-${Date.now()}`;

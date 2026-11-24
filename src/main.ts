@@ -1,6 +1,7 @@
 // Entry point: the Discord bot plus the scheduler.
 // Runs once at start, then after every shop reset; answers /shop and /wishlist in between.
 
+import { ensureOwner } from "./accounts.ts";
 import { loadCatalog, storeSkins } from "./catalog.ts";
 import { listenForCommands, registerCommands } from "./commands.ts";
 import { loadConfig } from "./config.ts";
@@ -50,6 +51,12 @@ try {
   log.error(`Discord setup: ${err instanceof DiscordSetupError ? err.message : String(err)}`);
   await client.destroy();
   process.exit(1);
+}
+
+// The owner is always in the account registry. The username lookup is best-effort.
+const ownerUser = await client.users.fetch(config.DISCORD_OWNER_ID).catch(() => null);
+if (ensureOwner(state.accounts, { discordUserId: config.DISCORD_OWNER_ID, discordUsername: ownerUser?.username ?? "", puuid: state.puuid })) {
+  await saveState(state);
 }
 
 const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
