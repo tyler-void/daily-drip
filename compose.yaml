@@ -24,6 +24,9 @@ services:
       HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
       TOKEN_KEY: ${TOKEN_KEY:-}
       HENRIK_API_KEY: ${HENRIK_API_KEY:-}
+      RECAP: ${RECAP:-off}
+      RECAP_CHANNEL_ID: ${RECAP_CHANNEL_ID:-}
+      RECAP_QUEUES: ${RECAP_QUEUES:-}
       TZ: ${TZ:-UTC}
     volumes:
       - daily-drip-data:/app/data
