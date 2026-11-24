@@ -165,6 +165,7 @@ listenForCommands(client, {
   storeSkins: () => skinList,
   members: memberCommands,
   riotName: riotNameOf,
+  catalog: () => catalog,
 });
 
 const healthcheckUrl = config.HEALTHCHECK_URL;

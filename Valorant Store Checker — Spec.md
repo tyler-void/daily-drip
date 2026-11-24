@@ -181,6 +181,7 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 
 - Gateway intent `Guilds` only; no privileged intents.
 - Slash commands are registered to `DISCORD_GUILD_ID` on start, so changes show up at once.
+- `/preview skin:<name> [level:<n>]` shows any store skin's card (no price) and, as a follow-up message, its Riot preview video, so it plays inline. Both options autocomplete; the level list names what each upgrade adds ("Level 2 of 4: VFX") and marks levels without a video. Without a level, the video is the fully upgraded one. Open to everyone in the server: it reads only public catalog data. The catalog keeps each level's number, upgrade name (`levelItem`) and own video for this (schema 5).
 - `/shop` answers the owner and linked members, each about their own account, in public and named like the daily post but without a ping. Anyone else gets an ephemeral refusal (or, with linking on, a pointer to `/link`). It replies with the cached snapshot while its `expiresAt` is in the future; otherwise it starts a run and replies with the result (or the cookie-dead or link-again notice). `/wishlist` replies are always ephemeral.
 - Every run, scheduled or from `/shop`, takes one lock, so two reauths never overlap. Overlapping reauths would both rotate the cookie and one rotation would be lost.
 - No command accepts a cookie: pasting one into Discord would store it on Discord's servers.

@@ -5,6 +5,9 @@ import {
   handleLinkCommand,
   handleLinkModal,
   handlePasteButton,
+  handlePreviewAutocomplete,
+  handlePreviewCommand,
+  type PreviewInteraction,
   handleShopCommand,
   handleUnlinkCommand,
   handleWishlistCommand,
@@ -18,9 +21,11 @@ import {
   type UserShop,
   type WishlistInteraction,
 } from "../src/commands.ts";
+import { buildCatalogEntries, type Catalog } from "../src/catalog.ts";
 import { linkDeadText } from "../src/members.ts";
 import { LoginDeadError } from "../src/riot/login.ts";
 import type { ShopSnapshot } from "../src/shop.ts";
+import { GAME_VERSION, themesData, tiersData, weaponsData } from "./fakes.ts";
 
 const OWNER = "100000000000000001";
 const FRIEND = "200000000000000002";
@@ -237,4 +242,70 @@ test("/shop sends the preview videos as a follow-up, after the shop; none when n
   const plain = interaction(OWNER);
   await handleShopCommand(plain.interaction, deps({}));
   expect(plain.events.map((e) => e.kind)).toEqual(["reply"]);
+});
+
+// ---------- /preview ----------
+
+
+const previewCatalog = (): Catalog => ({
+  schema: 5,
+  gameVersion: GAME_VERSION,
+  fetchedAt: "",
+  ...buildCatalogEntries(weaponsData, tiersData, themesData),
+  prices: null,
+  fandom: { Imperium: "Imperium Collection" },
+});
+
+function previewInteraction(skin: string | null, level: number | null) {
+  const { interaction: base, events } = interaction(STRANGER);
+  const i = { ...base, options: { getString: (n: string) => (n === "skin" ? skin : null), getInteger: (n: string) => (n === "level" ? level : null) } };
+  return { i: i as unknown as PreviewInteraction, events };
+}
+
+test("/preview works for anyone: the card, then the fully upgraded video as a follow-up", async () => {
+  const { i, events } = previewInteraction("Imperium Vandal", null);
+  await handlePreviewCommand(i, { ...deps(undefined), catalog: previewCatalog });
+  expect(events.map((e) => e.kind)).toEqual(["reply", "followUp"]);
+  expect(events[0]?.options.content).toBe("**Preview** · Imperium Vandal · fully upgraded");
+  expect(events[0]?.options.embeds[0].title).toBe("Imperium Vandal");
+  expect(events[0]?.options.embeds[0].description).not.toContain("VP");
+  expect(events[1]?.options.content).toBe("Imperium Vandal (fully upgraded)\nhttps://video.example/imperium-vandal-level2.mp4");
+});
+
+test("/preview with a level shows that level and its own video", async () => {
+  const { i, events } = previewInteraction("Imperium Vandal", 1);
+  await handlePreviewCommand(i, { ...deps(undefined), catalog: previewCatalog });
+  expect(events[0]?.options.content).toBe("**Preview** · Imperium Vandal · level 1 of 2: Base");
+  expect(events[1]?.options.content).toBe("Imperium Vandal (level 1: Base)\nhttps://video.example/imperium-vandal-level1.mp4");
+});
+
+test("/preview of a skin without a video says so and sends no follow-up; a bad name is answered privately", async () => {
+  const judge = previewInteraction("Celestial Judge", null);
+  await handlePreviewCommand(judge.i, { ...deps(undefined), catalog: previewCatalog });
+  expect(judge.events.map((e) => e.kind)).toEqual(["reply"]);
+  expect(judge.events[0]?.options.content).toContain("Riot has no preview video for this skin");
+
+  const bad = previewInteraction("Kuronami", null);
+  await handlePreviewCommand(bad.i, { ...deps(undefined), catalog: previewCatalog });
+  expect(bad.events[0]?.options.flags).toBe(MessageFlags.Ephemeral);
+});
+
+test("/preview autocomplete: skin names, then the chosen skin's levels with what each adds", async () => {
+  const answers: unknown[] = [];
+  const ac = (name: string, value: string | number, skin: string | null) => ({
+    options: { getFocused: () => ({ name, value }), getString: (n: string) => (n === "skin" ? skin : null) },
+    respond: async (c: unknown) => void answers.push(c),
+  });
+  const d = { ...deps(undefined), catalog: previewCatalog, storeSkins: () => [{ name: "Imperium Vandal", weapon: "Vandal" }, { name: "Celestial Judge", weapon: "Judge" }] };
+  await handlePreviewAutocomplete(ac("skin", "imp", null), d);
+  await handlePreviewAutocomplete(ac("level", "", "Imperium Vandal"), d);
+  await handlePreviewAutocomplete(ac("level", "", "nope"), d);
+  expect(answers).toEqual([
+    [{ name: "Imperium Vandal", value: "Imperium Vandal" }],
+    [
+      { name: "Level 1 of 2: Base", value: 1 },
+      { name: "Level 2 of 2: Kill banner", value: 2 },
+    ],
+    [],
+  ]);
 });

@@ -37,20 +37,7 @@ export interface ShopHolder {
  */
 export function shopMessage(snapshot: ShopSnapshot, holder?: ShopHolder): DiscordMessage {
   const resetsAt = Math.floor(Date.parse(snapshot.expiresAt) / 1000);
-  const embeds = snapshot.offers.map((offer) => {
-    const price = offer.vp !== null ? `**${vp(offer.vp)}**` : "Price unknown";
-    const links = offer.links;
-    // The title links to the collection's Fandom page; clicking the image always opens the image.
-    const linkLine = links
-      ? `\n[Fandom](${links.fandom}) · [Trailer](${links.trailer})${links.preview ? ` · [Preview](${links.preview})` : ""}`
-      : "";
-    const embed = new EmbedBuilder().setTitle(offer.name).setDescription(price + linkLine);
-    if (links) embed.setURL(links.fandom);
-    if (offer.iconUrl) embed.setImage(offer.iconUrl);
-    const color = offer.tier ? Number.parseInt(offer.tier.color, 16) : Number.NaN;
-    if (offer.tier && Number.isFinite(color)) embed.setColor(color).setFooter({ text: offer.tier.name });
-    return embed.toJSON();
-  });
+  const embeds = snapshot.offers.map((offer) => offerEmbed(offer));
   // <t:…:R> renders as "in 20 hours" in each viewer's own time zone, and keeps counting.
   const countdown = `resets <t:${resetsAt}:R>`;
   if (!holder) return { content: `**Daily shop** · ${countdown}`, embeds, allowedMentions: { parse: [] } };
@@ -62,6 +49,35 @@ export function shopMessage(snapshot: ShopSnapshot, holder?: ShopHolder): Discor
     // Without the ping, the mention still shows the name; it just doesn't notify.
     allowedMentions: holder.ping ? { users: [holder.userId] } : { parse: [] },
   };
+}
+
+/**
+ * One skin's card: name (linking to Fandom), price, links, image, tier colour. `showPrice: false`
+ * leaves the price out, for /preview, which isn't about a shop.
+ */
+export function offerEmbed(offer: ShopOffer, showPrice = true): APIEmbed {
+  const price = showPrice ? (offer.vp !== null ? `**${vp(offer.vp)}**` : "Price unknown") : "";
+  const links = offer.links;
+  // The title links to the collection's Fandom page; clicking the image always opens the image.
+  const linkLine = links ? `[Fandom](${links.fandom}) · [Trailer](${links.trailer})${links.preview ? ` · [Preview](${links.preview})` : ""}` : "";
+  const description = [price, linkLine].filter(Boolean).join("\n");
+  const embed = new EmbedBuilder().setTitle(offer.name);
+  if (description) embed.setDescription(description);
+  if (links) embed.setURL(links.fandom);
+  if (offer.iconUrl) embed.setImage(offer.iconUrl);
+  const color = offer.tier ? Number.parseInt(offer.tier.color, 16) : Number.NaN;
+  if (offer.tier && Number.isFinite(color)) embed.setColor(color).setFooter({ text: offer.tier.name });
+  return embed.toJSON();
+}
+
+/**
+ * The /preview card; the video follows as its own message (previewMessage). `level` is the chosen
+ * level and the skin's level count; without it, the video is the fully upgraded one.
+ */
+export function skinCardMessage(offer: ShopOffer, level?: { level: number; label: string; of: number }): DiscordMessage {
+  const which = level ? `level ${level.level} of ${level.of}: ${escapeMarkdown(level.label)}` : "fully upgraded";
+  const note = offer.links?.preview ? "" : `\nRiot has no preview video for this ${level ? "level" : "skin"}; try the trailer.`;
+  return { content: `**Preview** · ${escapeMarkdown(offer.name)} · ${which}${note}`, embeds: [offerEmbed(offer, false)], allowedMentions: { parse: [] } };
 }
 
 export function wishlistMessage(hits: ShopOffer[], ownerId: string): DiscordMessage {
@@ -122,8 +138,8 @@ export async function startDiscord(token: string): Promise<Client<true>> {
  * line. A bot can't put a video inside an embed, but Discord turns a bare video link into a player.
  * Null when no skin in the shop has a video.
  */
-export function previewMessage(snapshot: ShopSnapshot): DiscordMessage | null {
-  const lines = snapshot.offers.flatMap((o) => (o.links?.preview ? [`${escapeMarkdown(o.name)} (fully upgraded)`, o.links.preview] : []));
+export function previewMessage(snapshot: ShopSnapshot, label = "fully upgraded"): DiscordMessage | null {
+  const lines = snapshot.offers.flatMap((o) => (o.links?.preview ? [`${escapeMarkdown(o.name)} (${label})`, o.links.preview] : []));
   return lines.length > 0 ? { content: lines.join("\n"), embeds: [], allowedMentions: { parse: [] } } : null;
 }
 

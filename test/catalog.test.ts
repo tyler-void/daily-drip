@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildCatalogEntries,
+  levelItemName,
   type Catalog,
   CATALOG_SCHEMA,
   loadCatalog,
@@ -17,7 +18,7 @@ import {
   THEMES_URL,
 } from "../src/catalog.ts";
 import { FANDOM_API } from "../src/links.ts";
-import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO_TOP, versionRoute, weaponsData } from "./fakes.ts";
+import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO, VANDAL_VIDEO_TOP, versionRoute, weaponsData } from "./fakes.ts";
 
 describe("buildCatalogEntries", () => {
   const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData, themesData);
@@ -30,7 +31,11 @@ describe("buildCatalogEntries", () => {
       tier: TIER_EXCLUSIVE,
       collection: "Imperium",
       video: VANDAL_VIDEO_TOP,
+      level: 1,
+      levelItem: null,
+      levelVideo: VANDAL_VIDEO,
     });
+    expect(skins[LEVEL_VANDAL_2]).toMatchObject({ level: 2, levelItem: "Kill banner", levelVideo: VANDAL_VIDEO_TOP });
     expect(skins[LEVEL_VANDAL_2]?.name).toBe("Imperium Vandal");
   });
 
@@ -155,4 +160,11 @@ describe("resolveGameVersion", () => {
     const { http } = fakeHttp({ [VERSION_URL]: () => new Response("down", { status: 500 }) });
     await expect(resolveGameVersion(http, null)).rejects.toThrow("E5 version returned 500");
   });
+});
+
+test("levelItemName turns Riot's upgrade names into words", () => {
+  expect(levelItemName("EEquippableSkinLevelItem::VFX")).toBe("VFX");
+  expect(levelItemName("EEquippableSkinLevelItem::KillBanner")).toBe("Kill banner");
+  expect(levelItemName("EEquippableSkinLevelItem::HeartbeatAndMapSensor")).toBe("Heartbeat and map sensor");
+  expect(levelItemName(null)).toBeNull();
 });

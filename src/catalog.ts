@@ -16,7 +16,7 @@ export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
 export const THEMES_URL = "https://valorant-api.com/v1/themes";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 4;
+export const CATALOG_SCHEMA = 5;
 
 export interface GameVersion {
   version: string;
@@ -34,6 +34,12 @@ export interface CatalogSkin {
   collection: string | null;
   /** Riot's preview video of the skin's fully upgraded level (the last level that has one). */
   video: string | null;
+  /** This level's number, 1 for the base level the shop sells. */
+  level: number;
+  /** What this level adds, e.g. "VFX" or "Kill banner"; null for level 1. */
+  levelItem: string | null;
+  /** This level's own preview video, for /preview with a level. */
+  levelVideo: string | null;
 }
 
 /** A store skin for /wishlist autocomplete. */
@@ -104,9 +110,20 @@ export function buildCatalogEntries(weapons: unknown, tiers: unknown, themes: un
       const levels = asArray(field(skin, "levels"));
       // The shop sells level 1, whose video shows the base model; the last level's shows every upgrade.
       const video = levels.map((l) => text(field(l, "streamedVideo"))).findLast((v) => v !== null) ?? null;
-      for (const level of levels) {
+      for (const [index, level] of levels.entries()) {
         const uuid = text(field(level, "uuid"));
-        if (uuid) skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier, collection, video };
+        if (!uuid) continue;
+        skins[uuid] = {
+          name,
+          weapon: weaponName,
+          icon: text(field(level, "displayIcon")) ?? skinIcon,
+          tier,
+          collection,
+          video,
+          level: index + 1,
+          levelItem: levelItemName(text(field(level, "levelItem"))),
+          levelVideo: text(field(level, "streamedVideo")),
+        };
       }
     }
   }
@@ -200,6 +217,14 @@ async function getJson(http: Http, url: string, what: string, timeoutMs?: number
 
 function isThirdPartyOutage(err: unknown): boolean {
   return err instanceof NetworkError || err instanceof UnexpectedResponseError;
+}
+
+/** "EEquippableSkinLevelItem::KillBanner" -> "Kill banner"; "VFX" stays "VFX". */
+export function levelItemName(raw: string | null): string | null {
+  const key = raw?.split("::").pop();
+  if (!key) return null;
+  const words = key.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+  return words.map((w, i) => (i === 0 || /^[A-Z]{2,}$/.test(w) ? w : w.toLowerCase())).join(" ");
 }
 
 function asArray(value: unknown): unknown[] {

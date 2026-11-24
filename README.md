@@ -15,6 +15,7 @@ It is read-only, and it needs neither the game nor the Riot Client running.
 | `/shop` | Today's shop, on demand. Answered from the last fetch until the shop resets |
 | `/wishlist add` | Pick a gun, then one of its current skins (both autocomplete), or "Any weapon" with part of a name: "Reaver" matches every Reaver skin |
 | `/wishlist remove`, `list`, `clear` | Manage the wishlist; `list` marks entries that are in today's shop |
+| `/preview` | Any store skin's card and Riot's preview video, playing inline. Pick the skin (autocomplete) and optionally an upgrade level; without one you get the fully upgraded video. Open to everyone in the server |
 | `/link`, `/unlink` | Other members link or unlink their own Riot account (only when linking is on, see below) |
 
 `/shop` and `/wishlist` answer the owner, and linked members about their own account.

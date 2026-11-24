@@ -22,10 +22,11 @@ import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
 import { log, redact } from "./log.ts";
 import { linkDeadText } from "./members.ts";
-import { type DiscordMessage, previewMessage, shopMessage } from "./notify/discord.ts";
+import { type DiscordMessage, previewMessage, shopMessage, skinCardMessage } from "./notify/discord.ts";
 import { CookieDeadError } from "./riot/auth.ts";
 import { LoginDeadError } from "./riot/login.ts";
-import type { ShopSnapshot } from "./shop.ts";
+import { findStoreSkin, resolveStoreSkin, type ShopSnapshot, skinLevels } from "./shop.ts";
+import type { Catalog } from "./catalog.ts";
 import { addEntry, MAX_ENTRIES, MAX_ENTRY_LENGTH, matchWishlist, removeEntry, suggest } from "./wishlist.ts";
 
 export const ANY_WEAPON = "any";
@@ -38,6 +39,13 @@ export const LINK_MODAL = "link:modal";
 export const LINK_ADDRESS_FIELD = "address";
 
 export const shopCommand = new SlashCommandBuilder().setName("shop").setDescription("Show today's Valorant shop");
+export const previewCommand = new SlashCommandBuilder()
+  .setName("preview")
+  .setDescription("Show any store skin with its fully upgraded preview video")
+  .addStringOption((o) => o.setName("skin").setDescription("The skin; start typing its name").setRequired(true).setAutocomplete(true).setMaxLength(100))
+  .addIntegerOption((o) =>
+    o.setName("level").setDescription("Which upgrade level to preview; leave empty for fully upgraded").setMinValue(1).setMaxValue(10).setAutocomplete(true),
+  );
 export const linkCommand = new SlashCommandBuilder().setName("link").setDescription("Link your Riot account to get your own daily shop");
 export const unlinkCommand = new SlashCommandBuilder()
   .setName("unlink")
@@ -77,7 +85,7 @@ export const wishlistCommand = new SlashCommandBuilder()
  */
 export async function registerCommands(client: Client<true>, guildId: string, linking = false): Promise<void> {
   const guild = await client.guilds.fetch(guildId);
-  const commands = [shopCommand, wishlistCommand, ...(linking ? [linkCommand, unlinkCommand] : [])];
+  const commands = [shopCommand, wishlistCommand, previewCommand, ...(linking ? [linkCommand, unlinkCommand] : [])];
   await guild.commands.set(commands.map((c) => c.toJSON()));
 }
 
@@ -116,6 +124,8 @@ export interface CommandDeps {
   /** Current store skins from the catalog, for autocomplete. */
   storeSkins(): StoreSkin[];
   members?: MemberCommands;
+  /** The current catalog, for /preview. */
+  catalog?: () => Catalog | null;
   /** A Discord user's linked Riot ID, shown on their shop; null while unknown. */
   riotName?: (userId: string) => string | null;
   now?: () => number;
@@ -142,8 +152,8 @@ export interface CommandInteraction {
 }
 
 /** The preview videos after a /shop reply, like after the daily post. Best-effort: the shop is already shown. */
-async function sendPreviews(interaction: CommandInteraction, snapshot: ShopSnapshot): Promise<void> {
-  const previews = previewMessage(snapshot);
+async function sendPreviews(interaction: CommandInteraction, snapshot: ShopSnapshot, label?: string): Promise<void> {
+  const previews = previewMessage(snapshot, label);
   if (previews && interaction.followUp) {
     await interaction.followUp(previews).catch((err: unknown) => log.warn("could not post the preview videos", { error: err }));
   }
@@ -317,6 +327,53 @@ export function wishlistChoices(option: string, typed: string, weapon: string | 
   return [];
 }
 
+// ---------- /preview ----------
+
+export interface PreviewInteraction extends CommandInteraction {
+  options: { getString(name: string): string | null; getInteger(name: string): number | null };
+}
+
+/**
+ * Any store skin's card, then its preview video as a follow-up so Discord plays it inline. Open to
+ * everyone in the server: it reads only public catalog data, no account.
+ */
+export async function handlePreviewCommand(interaction: PreviewInteraction, deps: CommandDeps): Promise<void> {
+  const found = findStoreSkin(deps.catalog?.() ?? null, interaction.options.getString("skin") ?? "", interaction.options.getInteger("level"));
+  if (!found.ok) {
+    await interaction.reply({ content: found.reason, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const level = found.level ? { level: found.level.level, label: found.level.label, of: found.levels } : undefined;
+  await interaction.reply(skinCardMessage(found.offer, level));
+  const label = level ? `level ${level.level}: ${level.label}` : undefined;
+  await sendPreviews(interaction, { fetchedAt: "", expiresAt: "", hash: "", offers: [found.offer] }, label);
+}
+
+export interface PreviewAutocomplete {
+  options: { getFocused(full: true): { name: string; value: string | number }; getString(name: string): string | null };
+  respond(choices: { name: string; value: string | number }[]): Promise<unknown>;
+}
+
+/** Skin names for "skin"; for "level", the chosen skin's levels and what each adds. */
+export async function handlePreviewAutocomplete(interaction: PreviewAutocomplete, deps: CommandDeps): Promise<void> {
+  const focused = interaction.options.getFocused(true);
+  if (focused.name === "level") {
+    const catalog = deps.catalog?.() ?? null;
+    const skin = resolveStoreSkin(catalog, interaction.options.getString("skin") ?? "");
+    if (!skin.ok || !catalog) {
+      await interaction.respond([]);
+      return;
+    }
+    const levels = skinLevels(catalog, skin.name);
+    await interaction.respond(
+      levels.map((l) => ({ name: `Level ${l.level} of ${levels.length}: ${l.label}${l.video ? "" : " (no video)"}`.slice(0, 100), value: l.level })),
+    );
+    return;
+  }
+  const names = deps.storeSkins().map((s) => s.name);
+  await interaction.respond(suggest(names, String(focused.value), 25).map((n) => limitChoice({ name: n, value: n })));
+}
+
 // ---------- /link and /unlink ----------
 
 export const LINK_STEPS = [
@@ -440,6 +497,7 @@ export function listenForCommands(client: Client, deps: CommandDeps): void {
     try {
       if (interaction.isAutocomplete()) {
         if (interaction.commandName === "wishlist") await handleWishlistAutocomplete(interaction, deps);
+        else if (interaction.commandName === "preview") await handlePreviewAutocomplete(interaction, deps);
         return;
       }
       if (interaction.isButton()) {
@@ -453,6 +511,7 @@ export function listenForCommands(client: Client, deps: CommandDeps): void {
       if (!interaction.isChatInputCommand()) return;
       if (interaction.commandName === "shop") await handleShopCommand(interaction, deps);
       else if (interaction.commandName === "wishlist") await handleWishlistCommand(interaction, deps);
+      else if (interaction.commandName === "preview") await handlePreviewCommand(interaction, deps);
       else if (interaction.commandName === "link") await handleLinkCommand(interaction, deps);
       else if (interaction.commandName === "unlink") await handleUnlinkCommand(interaction, deps);
     } catch (err) {

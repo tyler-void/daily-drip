@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildCatalogEntries, type Catalog, CATALOG_SCHEMA, loadCatalog, saveCatalog, TIERS_URL, VERSION_URL, WEAPONS_URL } from "../src/catalog.ts";
 import { REAUTH_URL, UnexpectedResponseError, USERINFO_URL } from "../src/riot/auth.ts";
 import { BadClaimsError, MaintenanceError } from "../src/riot/store.ts";
-import { buildSnapshot, fetchShop, type ShopDeps, snapshotHash, withLinks } from "../src/shop.ts";
+import { buildSnapshot, fetchShop, findStoreSkin, type ShopDeps, skinLevels, snapshotHash, withLinks } from "../src/shop.ts";
 import { emptyState, type State } from "../src/state.ts";
 import {
   fakeRiot,
@@ -14,12 +14,14 @@ import {
   LEVEL_JUDGE,
   LEVEL_UNKNOWN,
   LEVEL_VANDAL,
+  LEVEL_VANDAL_2,
   OFFERS_URL,
   type Route,
   STOREFRONT_URL,
   storefrontBody,
   themesData,
   tiersData,
+  VANDAL_VIDEO,
   VANDAL_VIDEO_TOP,
   versionRoute,
   weaponsData,
@@ -230,5 +232,41 @@ describe("withLinks", () => {
     expect(withLinks(null, catalog())).toBeNull();
     const old = { ...fresh, offers: fresh.offers.map(({ links: _, ...o }) => o) };
     expect(withLinks(old, null)).toBe(old);
+  });
+});
+
+describe("findStoreSkin (/preview)", () => {
+  test("an exact name (any case) gives the shop's level with the fully upgraded video", () => {
+    const found = findStoreSkin(catalog(), "imperium vandal");
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.offer).toMatchObject({ levelUuid: LEVEL_VANDAL, name: "Imperium Vandal", vp: null, tier: { name: "Exclusive" } });
+    expect(found.offer.links?.preview).toBe(VANDAL_VIDEO_TOP);
+    expect(found.level).toBeNull();
+    expect(found.levels).toBe(2);
+  });
+
+  test("a level gives that level's image and its own video", () => {
+    const one = findStoreSkin(catalog(), "Imperium Vandal", 1);
+    const two = findStoreSkin(catalog(), "Imperium Vandal", 2);
+    if (!one.ok || !two.ok) throw new Error("not found");
+    expect(one.offer.links?.preview).toBe(VANDAL_VIDEO);
+    expect(one.level).toMatchObject({ level: 1, label: "Base" });
+    expect(two.offer.levelUuid).toBe(LEVEL_VANDAL_2);
+    expect(two.level).toMatchObject({ level: 2, label: "Kill banner", video: VANDAL_VIDEO_TOP });
+  });
+
+  test("a level the skin doesn't have, an unknown or ambiguous name, or too little text is refused", () => {
+    expect(findStoreSkin(catalog(), "Imperium Vandal", 3)).toEqual({ ok: false, reason: "**Imperium Vandal** has 2 levels; pick one of the suggestions." });
+    expect(findStoreSkin(catalog(), "Kuronami").ok).toBe(false);
+    expect(findStoreSkin(catalog(), "a").ok).toBe(false);
+    expect(findStoreSkin(null, "Imperium Vandal").ok).toBe(false);
+    // "Standard Vandal" has no tier, so only "Imperium Vandal" counts and "vandal" is unique.
+    const vandal = findStoreSkin(catalog(), "vandal");
+    expect(vandal.ok && vandal.offer.name).toBe("Imperium Vandal");
+  });
+
+  test("skinLevels lists a skin's levels in order with what each adds", () => {
+    expect(skinLevels(catalog(), "Imperium Vandal").map((l) => `${l.level}:${l.label}:${l.video ? "video" : "-"}`)).toEqual(["1:Base:video", "2:Kill banner:video"]);
   });
 });

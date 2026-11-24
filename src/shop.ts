@@ -108,6 +108,76 @@ export function withLinks(snapshot: ShopSnapshot | null, catalog: Catalog | null
   };
 }
 
+/** One level of a store skin, for /preview. */
+export interface SkinLevel {
+  level: number;
+  levelUuid: string;
+  /** "Base" for level 1, otherwise what the level adds, e.g. "VFX". */
+  label: string;
+  video: string | null;
+}
+
+/**
+ * Which store skin the user means: an exact name first (case-insensitive), then a part of a name that
+ * only one skin contains.
+ */
+export function resolveStoreSkin(catalog: Catalog | null, typed: string): { ok: true; name: string } | { ok: false; reason: string } {
+  if (!catalog) return { ok: false, reason: "The skin list isn't loaded yet; try again in a minute." };
+  const query = typed.trim().toLowerCase();
+  if (query.length < 2) return { ok: false, reason: "Type at least 2 letters of a skin name, then pick one of the suggestions." };
+  const names = [...new Set(Object.values(catalog.skins).filter((s) => s.tier !== null).map((s) => s.name))];
+  const exact = names.find((n) => n.toLowerCase() === query);
+  const partial = names.filter((n) => n.toLowerCase().includes(query));
+  const name = exact ?? (partial.length === 1 ? partial[0] : undefined);
+  if (name) return { ok: true, name };
+  return {
+    ok: false,
+    reason: partial.length === 0 ? `No store skin is called **${typed.trim()}**.` : `**${typed.trim()}** matches ${partial.length} skins; pick one of the suggestions.`,
+  };
+}
+
+/** A store skin's levels, in order. */
+export function skinLevels(catalog: Catalog, name: string): SkinLevel[] {
+  return Object.entries(catalog.skins)
+    .filter(([, s]) => s.name === name && s.tier !== null)
+    .map(([levelUuid, s]) => ({ level: s.level ?? 1, levelUuid, label: s.levelItem ?? "Base", video: s.levelVideo ?? null }))
+    .sort((a, b) => a.level - b.level);
+}
+
+/**
+ * A store skin as an offer-shaped card for /preview. Without a level, the card shows the level the
+ * shop sells and the fully upgraded video; with one, that level's image and its own video.
+ */
+export function findStoreSkin(
+  catalog: Catalog | null,
+  typed: string,
+  level: number | null = null,
+): { ok: true; offer: ShopOffer; level: SkinLevel | null; levels: number } | { ok: false; reason: string } {
+  const resolved = resolveStoreSkin(catalog, typed);
+  if (!resolved.ok || !catalog) return resolved.ok ? { ok: false, reason: "The skin list isn't loaded yet." } : resolved;
+  const levels = skinLevels(catalog, resolved.name);
+  const chosen = level === null ? null : levels.find((l) => l.level === level);
+  if (level !== null && !chosen) {
+    return { ok: false, reason: `**${resolved.name}** has ${levels.length} level${levels.length === 1 ? "" : "s"}; pick one of the suggestions.` };
+  }
+  const levelUuid = (chosen ?? levels[0])?.levelUuid as string;
+  const skin = catalog.skins[levelUuid] as Catalog["skins"][string];
+  const video = chosen ? chosen.video : (skin.video ?? null);
+  return {
+    ok: true,
+    level: chosen ?? null,
+    levels: levels.length,
+    offer: {
+      levelUuid,
+      name: skin.name,
+      iconUrl: skin.icon,
+      vp: null,
+      tier: skin.tier ? (catalog.tiers[skin.tier] ?? null) : null,
+      links: skin.collection ? offerLinks(skin.collection, video, catalog.fandom ?? null) : null,
+    },
+  };
+}
+
 /** The owner's run. Saves the snapshot in state; throws the typed errors the scheduler reacts to. */
 export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   const { state } = deps;

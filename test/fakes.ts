@@ -84,7 +84,7 @@ export const weaponsData = [
         chromas: [{ fullRender: "https://media.example/vandal-chroma.png" }],
         levels: [
           { uuid: LEVEL_VANDAL, displayName: "Imperium Vandal", displayIcon: "https://media.example/vandal-level1.png", streamedVideo: VANDAL_VIDEO },
-          { uuid: LEVEL_VANDAL_2, displayName: "Imperium Vandal Level 2", displayIcon: null, streamedVideo: VANDAL_VIDEO_TOP },
+          { uuid: LEVEL_VANDAL_2, displayName: "Imperium Vandal Level 2", displayIcon: null, streamedVideo: VANDAL_VIDEO_TOP, levelItem: "EEquippableSkinLevelItem::KillBanner" },
         ],
       },
       { displayName: "Standard Vandal", contentTierUuid: null, displayIcon: "https://media.example/std.png", chromas: [], levels: [{ uuid: "std-level", displayIcon: null }] },
