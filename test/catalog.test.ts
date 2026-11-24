@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildCatalogEntries,
+  AGENTS_URL,
+  buildNames,
+  MAPS_URL,
+  RANKS_URL,
   levelItemName,
   type Catalog,
   CATALOG_SCHEMA,
@@ -18,7 +22,7 @@ import {
   THEMES_URL,
 } from "../src/catalog.ts";
 import { FANDOM_API } from "../src/links.ts";
-import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO, VANDAL_VIDEO_TOP, versionRoute, weaponsData } from "./fakes.ts";
+import { agentsData, fakeHttp, GAME_VERSION, linkRoutes, mapsData, ranksData, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO, VANDAL_VIDEO_TOP, versionRoute, weaponsData } from "./fakes.ts";
 
 describe("buildCatalogEntries", () => {
   const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData, themesData);
@@ -103,6 +107,9 @@ const catalogRoutes = {
   [THEMES_URL]: () => Response.json({ status: 200, data: themesData }),
   [FANDOM_QUERY]: () =>
     Response.json({ query: { pages: { "1": { title: "Imperium Collection" }, "-1": { title: "Celestial Collection", missing: "" } } } }),
+  [MAPS_URL]: () => Response.json({ status: 200, data: mapsData }),
+  [AGENTS_URL]: () => Response.json({ status: 200, data: agentsData }),
+  [RANKS_URL]: () => Response.json({ status: 200, data: ranksData }),
 };
 
 describe("refreshCatalog", () => {
@@ -117,7 +124,7 @@ describe("refreshCatalog", () => {
     const { http, urls } = fakeHttp(catalogRoutes);
     const patched = { ...GAME_VERSION, version: "13.11.00.1" };
     const catalog = await refreshCatalog(http, patched, cachedCatalog(), catalogFile);
-    expect(urls().sort()).toEqual([FANDOM_QUERY, TIERS_URL, THEMES_URL, WEAPONS_URL].sort());
+    expect(urls().sort()).toEqual([AGENTS_URL, FANDOM_QUERY, MAPS_URL, RANKS_URL, TIERS_URL, THEMES_URL, WEAPONS_URL].sort());
     expect(catalog?.fandom).toEqual({ Imperium: "Imperium Collection", Celestial: null });
     expect(catalog?.gameVersion.version).toBe("13.11.00.1");
     expect(catalog?.prices).toBeNull();
@@ -197,4 +204,22 @@ describe("refreshCatalog when the themes or Fandom fail", () => {
     expect(await refreshCatalog(again.http, GAME_VERSION, built, catalogFile)).toBe(built);
     expect(again.calls).toHaveLength(0);
   });
+});
+
+test("buildNames: maps by Riot path and by UUID, agents by UUID, ranks from the newest episode, title-cased", () => {
+  const names = buildNames(mapsData, agentsData, ranksData);
+  expect(names.maps).toEqual({ "/Game/Maps/Ascent/Ascent": "Ascent", "7eaecc1b-4337-bbf6-6ab9-04b8f06b3319": "Ascent" });
+  expect(names.agents).toEqual({ "add6443a-41bd-e414-f6ad-e58d267f4e95": "Jett" });
+  expect(names.ranks).toEqual({ "0": "Unranked", "13": "Gold 2" });
+  expect(buildNames(null, {}, [])).toEqual({ maps: {}, agents: {}, ranks: {} });
+});
+
+test("refreshCatalog: failing name lists leave names null and mark the catalog incomplete", async () => {
+  const { http } = fakeHttp({ ...catalogRoutes, ...linkRoutes(), [RANKS_URL]: () => new Response("down", { status: 503 }) });
+  const catalog = await refreshCatalog(http, GAME_VERSION, null, catalogFile);
+  expect(catalog?.names).toBeNull();
+  expect(catalog?.incomplete).toBe(true);
+  const ok = await refreshCatalog(fakeHttp({ ...catalogRoutes, ...linkRoutes() }).http, GAME_VERSION, null, catalogFile);
+  expect(ok?.names?.maps["/Game/Maps/Ascent/Ascent"]).toBe("Ascent");
+  expect(ok?.incomplete).toBe(false);
 });

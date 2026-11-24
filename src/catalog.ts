@@ -14,9 +14,12 @@ export const VERSION_URL = "https://valorant-api.com/v1/version";
 export const WEAPONS_URL = "https://valorant-api.com/v1/weapons";
 export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
 export const THEMES_URL = "https://valorant-api.com/v1/themes";
+export const MAPS_URL = "https://valorant-api.com/v1/maps";
+export const AGENTS_URL = "https://valorant-api.com/v1/agents?isPlayableCharacter=true";
+export const RANKS_URL = "https://valorant-api.com/v1/competitivetiers";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 6;
+export const CATALOG_SCHEMA = 7;
 
 export interface GameVersion {
   version: string;
@@ -42,6 +45,16 @@ export interface CatalogSkin {
   levelVideo: string | null;
 }
 
+/** Names for match recaps (Match Recap Spec: formulas table). */
+export interface CatalogNames {
+  /** By Riot's map path ("/Game/Maps/Ascent/Ascent") and by lowercase UUID (HenrikDev's map.id). */
+  maps: Record<string, string>;
+  /** By lowercase agent UUID (characterId). */
+  agents: Record<string, string>;
+  /** By competitiveTier number, from the newest episode's table: "Gold 2", "Unranked". */
+  ranks: Record<string, string>;
+}
+
 /** A store skin for /wishlist autocomplete. */
 export interface StoreSkin {
   name: string;
@@ -65,6 +78,8 @@ export interface Catalog {
   prices: Record<string, number> | null;
   /** Which collections have a Fandom page (src/links.ts); null if that check failed. */
   fandom: FandomTitles | null;
+  /** Map, agent and rank names for match recaps; null if fetching them failed. */
+  names?: CatalogNames | null;
   /**
    * The themes or the Fandom check failed while building this catalog, so it lacks collections or
    * Fandom pages. It is used, but rebuilt on the next run instead of being kept for the whole version.
@@ -179,14 +194,21 @@ export async function refreshCatalog(
   if (usable && cached.gameVersion.version === gameVersion.version && !cached.incomplete) return cached;
   try {
     // Themes only add collection names (for the links); a failure there must not stop the shop.
-    const [weapons, tiers, themes] = await Promise.all([
+    // Themes and names only add links and recap names; a failure there must not stop the shop.
+    const optional = (url: string, what: string) =>
+      getJson(http, url, what, 30_000).catch((err: unknown) => {
+        log.warn(`could not fetch ${what}; retrying on the next run`, { error: err });
+        return { data: null };
+      });
+    const [weapons, tiers, themes, maps, agents, ranks] = await Promise.all([
       getJson(http, WEAPONS_URL, "E8 weapons", 30_000),
       getJson(http, TIERS_URL, "E9 content tiers"),
-      getJson(http, THEMES_URL, "themes", 30_000).catch((err: unknown) => {
-        log.warn("could not fetch skin collections; shop posts go out without links until the next run", { error: err });
-        return { data: null };
-      }),
+      optional(THEMES_URL, "skin collections"),
+      optional(MAPS_URL, "map names"),
+      optional(AGENTS_URL, "agent names"),
+      optional(RANKS_URL, "rank names"),
     ]);
+    const names = maps.data && agents.data && ranks.data ? buildNames(maps.data, agents.data, ranks.data) : null;
     const entries = buildCatalogEntries(weapons.data, tiers.data, themes.data);
     // Only collections of store skins: the daily shop never offers the others.
     const collections = [...new Set(Object.values(entries.skins).flatMap((s) => (s.tier !== null && s.collection ? [s.collection] : [])))];
@@ -198,8 +220,9 @@ export async function refreshCatalog(
       ...entries,
       prices: null,
       fandom,
-      // Retry next run rather than keep a catalog without links for the whole game version.
-      incomplete: themes.data === null || fandom === null,
+      names,
+      // Retry next run rather than keep a catalog without links or names for the whole game version.
+      incomplete: themes.data === null || fandom === null || names === null,
     };
     await saveCatalog(catalog, path);
     log.info("catalog refreshed", { version: gameVersion.version, skins: Object.keys(catalog.skins).length });
@@ -225,6 +248,36 @@ async function getJson(http: Http, url: string, what: string, timeoutMs?: number
 
 function isThirdPartyOutage(err: unknown): boolean {
   return err instanceof NetworkError || err instanceof UnexpectedResponseError;
+}
+
+/** valorant-api.com's maps, agents and competitive tiers -> the name tables recaps use. */
+export function buildNames(maps: unknown, agents: unknown, ranks: unknown): CatalogNames {
+  const names: CatalogNames = { maps: {}, agents: {}, ranks: {} };
+  for (const map of asArray(maps)) {
+    const name = text(field(map, "displayName"));
+    if (!name) continue;
+    const path = text(field(map, "mapUrl"));
+    const uuid = text(field(map, "uuid"));
+    if (path) names.maps[path] = name;
+    if (uuid) names.maps[uuid.toLowerCase()] = name;
+  }
+  for (const agent of asArray(agents)) {
+    const uuid = text(field(agent, "uuid"));
+    const name = text(field(agent, "displayName"));
+    if (uuid && name) names.agents[uuid.toLowerCase()] = name;
+  }
+  // The newest episode's table; tier numbers are stable across episodes, names are "IRON 1".
+  const newest = asArray(ranks).at(-1);
+  for (const tier of asArray(field(newest, "tiers"))) {
+    const n = field(tier, "tier");
+    const name = text(field(tier, "tierName"));
+    if (typeof n === "number" && name && !/^Unused/i.test(name)) names.ranks[String(n)] = titleCase(name);
+  }
+  return names;
+}
+
+function titleCase(name: string): string {
+  return name.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
 /** "EEquippableSkinLevelItem::KillBanner" -> "Kill banner"; "VFX" stays "VFX". */

@@ -1,6 +1,6 @@
 // A fake Riot + valorant-api.com for tests, with synthetic data (no real tokens or account data).
 
-import { THEMES_URL } from "../src/catalog.ts";
+import { AGENTS_URL, MAPS_URL, RANKS_URL, THEMES_URL } from "../src/catalog.ts";
 import type { Http, RequestOptions } from "../src/http.ts";
 import { FANDOM_API } from "../src/links.ts";
 import { ENTITLEMENTS_URL, PAS_URL, REAUTH_URL, USERINFO_URL } from "../src/riot/auth.ts";
@@ -132,8 +132,18 @@ export function storefrontBody(offers: string[], prices: Record<string, number> 
 /** The themes and the Fandom check, for a complete catalog: Imperium has a Fandom page, Celestial doesn't. */
 export const FANDOM_QUERY_URL = `${FANDOM_API}?${new URLSearchParams({ action: "query", format: "json", redirects: "1", titles: "Imperium Collection|Celestial Collection" })}`;
 
+export const mapsData = [{ uuid: "7EAECC1B-4337-BBF6-6AB9-04B8F06B3319", displayName: "Ascent", mapUrl: "/Game/Maps/Ascent/Ascent" }];
+export const agentsData = [{ uuid: "ADD6443A-41BD-E414-F6AD-E58D267F4E95", displayName: "Jett" }];
+export const ranksData = [
+  { uuid: "old", tiers: [{ tier: 13, tierName: "OLD NAME" }] },
+  { uuid: "new", tiers: [ { tier: 0, tierName: "UNRANKED" }, { tier: 1, tierName: "Unused1" }, { tier: 13, tierName: "GOLD 2" } ] },
+];
+
 export function linkRoutes(): Record<string, Route> {
   return {
+    [MAPS_URL]: () => Response.json({ status: 200, data: mapsData }),
+    [AGENTS_URL]: () => Response.json({ status: 200, data: agentsData }),
+    [RANKS_URL]: () => Response.json({ status: 200, data: ranksData }),
     [THEMES_URL]: () => Response.json({ status: 200, data: themesData }),
     [FANDOM_QUERY_URL]: () =>
       Response.json({ query: { pages: { "1": { title: "Imperium Collection" }, "-1": { title: "Celestial Collection", missing: "" } } } }),
