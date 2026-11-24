@@ -2,6 +2,7 @@
 
 import { readFile, rename } from "node:fs/promises";
 import type { AccountRegistry } from "./accounts.ts";
+import type { Roster } from "./roster.ts";
 import type { CookieJar } from "./cookies.ts";
 import { errorCode, writeFileAtomic } from "./files.ts";
 import { log } from "./log.ts";
@@ -23,7 +24,32 @@ export interface State {
   flags: AlertFlags;
   /** Who may use the bot, and which Riot account each Discord user linked. Keyed by Discord user id. */
   accounts: AccountRegistry;
+  /** Match recaps (Match Recap Spec): the roster and what was posted. No token or session is kept here. */
+  recap: RecapState;
 }
+
+export interface PostedMatch {
+  matchId: string;
+  messageId: string;
+  postedAt: string;
+  /** Tracked PUUIDs whose RR change wasn't known yet when it was posted. */
+  rrPending: string[];
+  /** Everyone tracked in the match, to rebuild the message when RR arrives. */
+  tracked: string[];
+  late: boolean;
+}
+
+export interface RecapState {
+  roster: Roster;
+  /** Newest first, at most MAX_POSTED_MATCHES. */
+  postedMatches: PostedMatch[];
+  /** Per PUUID, the newest match already looked at, so a poll only looks at newer ones. */
+  lastSeenMatch: Record<string, string>;
+}
+
+export const MAX_POSTED_MATCHES = 500;
+
+export const emptyRecapState = (): RecapState => ({ roster: {}, postedMatches: [], lastSeenMatch: {} });
 
 export interface AlertFlags {
   cookieDeadNotified: boolean;
@@ -49,6 +75,7 @@ export function emptyState(): State {
     lastSuccessAt: null,
     flags: noAlerts(),
     accounts: {},
+    recap: emptyRecapState(),
   };
 }
 
@@ -64,7 +91,14 @@ export async function loadState(path = DEFAULT_STATE_FILE): Promise<State> {
     const saved = JSON.parse(raw) as Partial<State>;
     const empty = emptyState();
     // A state file from before the registry has no `accounts`; it starts empty and main adds the owner.
-    return { ...empty, ...saved, flags: { ...empty.flags, ...saved.flags }, accounts: { ...saved.accounts } };
+    return {
+      ...empty,
+      ...saved,
+      flags: { ...empty.flags, ...saved.flags },
+      accounts: { ...saved.accounts },
+      // A state file from before recaps has no `recap`; it starts empty.
+      recap: { ...emptyRecapState(), ...saved.recap },
+    };
   } catch {
     // Atomic writes make this unlikely. Keep the bad file for inspection and fall back to the cookie file.
     const aside = `${path}.corrupt-${Date.now()}`;
