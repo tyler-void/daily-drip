@@ -17,7 +17,8 @@ import { ActionRowBuilder, type APIEmbed, ButtonBuilder, ButtonStyle, type Clien
 import type { CatalogNames } from "./catalog.ts";
 import type { Henrik, HenrikAccount } from "./henrik.ts";
 import { log, redact } from "./log.ts";
-import { recapMessage } from "./notify/recapMessage.ts";
+import { LoginDeadError } from "./riot/login.ts";
+import { type RecapInput, recapMessage, withCard } from "./notify/recapMessage.ts";
 import { type LookupDeps, MAX_MATCH_NUMBER, nthMatch, type Person, playerChoices, resolvePlayer } from "./recapLookup.ts";
 import * as roster from "./roster.ts";
 
@@ -81,13 +82,15 @@ export interface RecapCommandDeps {
   /** How /recap show fetches matches; null while recaps can't fetch anything. */
   lookup: LookupDeps;
   names: () => CatalogNames | null;
+  /** Draws the recap card; null or a failure means the text recap. */
+  card?: (input: RecapInput) => Promise<Uint8Array | null>;
   now?: () => number;
 }
 
 export const JOIN_EXPLAINER =
   "**Before you join:** after each of your competitive, unrated and swiftplay matches, the bot posts a recap **in this server's channel**, for everyone to see: your result, agent, K/D/A, ACS, HS%, ADR and RR change, and the match scoreboard. It reads your public match data through HenrikDev; it never signs in as you. `/recap leave` stops it and deletes your entry.";
 
-type Reply = { content: string; flags?: number; components?: ActionRowBuilder<ButtonBuilder>[]; embeds?: APIEmbed[]; allowedMentions?: { parse: [] } | { users: string[] } };
+type Reply = { content: string; flags?: number; components?: ActionRowBuilder<ButtonBuilder>[]; embeds?: APIEmbed[]; allowedMentions?: { parse: [] } | { users: string[] }; files?: { attachment: Buffer; name: string }[] };
 
 export interface RecapInteraction {
   user: { id: string; username: string };
@@ -179,13 +182,21 @@ export function createRecapCommands(deps: RecapCommandDeps) {
           // The asked-for player, plus everyone else on the roster who was in that match.
           const tracked = [...new Set([puuid, ...recap.players.filter((p) => roster.active(r).some((e) => e.puuid === p.puuid)).map((p) => p.puuid)])];
           const discordIds = Object.fromEntries(people.filter((p) => recap.players.some((x) => x.puuid === p.puuid)).map((p) => [p.puuid, p.discordUserId]));
-          const message = recapMessage({ recap, tracked, rr, names: deps.names(), discordIds });
+          const riotNames = Object.fromEntries(people.filter((p) => p.riotName && recap.players.some((x) => x.puuid === p.puuid)).map((p) => [p.puuid, p.riotName as string]));
+          const input = { recap, tracked, rr, names: deps.names(), discordIds, riotNames };
+          const png = deps.card ? await deps.card(input).catch(() => null) : null;
+          const message = withCard(recapMessage(input), png);
           const who = target.value.kind === "person" ? (target.value.person.riotName ?? target.value.person.discordUsername ?? "their") : `${target.value.account.name}#${target.value.account.tag}`;
           const which = n === 1 ? "latest match" : `match ${n} back`;
           // On demand: mentions show names but ping nobody.
           await i.editReply({ ...message, content: `**Recap** · ${escapeMarkdown(who)}'s ${which}`, allowedMentions: { parse: [] } });
         } catch (err) {
-          await i.editReply({ content: redact(`Couldn't fetch that match: ${err instanceof Error ? err.message : String(err)}`), allowedMentions: { parse: [] } });
+          log.warn("/recap show failed", { error: err });
+          const content =
+            err instanceof LoginDeadError
+              ? "Their Riot sign-in has run out, so the bot can't read their matches. They can `/link` again."
+              : redact(`Couldn't fetch that match: ${err instanceof Error ? err.message : String(err)}`);
+          await i.editReply({ content, allowedMentions: { parse: [] } });
         }
         return;
       }

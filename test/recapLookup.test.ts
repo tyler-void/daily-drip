@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import type { Henrik } from "../src/henrik.ts";
-import { type Person, playerChoices, resolvePlayer } from "../src/recapLookup.ts";
+import { nthMatch, type Person, playerChoices, resolvePlayer } from "../src/recapLookup.ts";
+import type { MatchRecap } from "../src/recap.ts";
+import type { PdApi } from "../src/recapPoll.ts";
+import { LoginDeadError } from "../src/riot/login.ts";
 
 const people: Person[] = [
   { discordUserId: "1", discordUsername: "tyler", riotName: "john whiff#1TAP", puuid: "p1", linked: true, region: null },
@@ -41,4 +44,19 @@ test("resolvePlayer refuses what it can't place", async () => {
   expect((await resolvePlayer("Other#1234", "1", people, null)).ok).toBe(false); // no HenrikDev key
   expect((await resolvePlayer("zzz", "1", people, henrik)).ok).toBe(false);
   expect(await resolvePlayer("r", "1", people, henrik)).toMatchObject({ ok: false, reason: expect.stringContaining("matches 2 people") });
+});
+
+test("a linked person whose sign-in is dead is read through HenrikDev; without HenrikDev the error stands", async () => {
+  const dead: PdApi = {
+    session: async () => { throw new LoginDeadError("the refresh: the sign-in is no longer valid"); },
+    dropSession: () => {},
+    history: async () => [],
+    details: async () => { throw new Error("unused"); },
+    rr: async () => [],
+  };
+  const match = { matchId: "m1", queue: "unrated" } as MatchRecap;
+  const viaHenrik: Henrik = { ...henrik, matches: async (region, puuid, n) => (region === "ap" && puuid === "p2" && n === 1 ? [match] : []) };
+  const target = { kind: "person" as const, person: people[1]! };
+  expect(await nthMatch(target, 1, { pd: dead, henrik: viaHenrik })).toEqual({ ok: true, value: { recap: match, puuid: "p2", rr: {} } });
+  await expect(nthMatch(target, 1, { pd: dead, henrik: null })).rejects.toBeInstanceOf(LoginDeadError);
 });

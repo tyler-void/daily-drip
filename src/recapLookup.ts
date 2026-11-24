@@ -6,9 +6,12 @@
 // or a Discord username of someone the bot knows.
 // Which: 1 is the latest match, 2 the one before, up to 10.
 // From where: linked people (the owner, and members who /link'ed) through their own Riot session,
-// with exact RR; everyone else through HenrikDev.
+// with exact RR; everyone else through HenrikDev. A linked person whose Riot sign-in has died is read
+// through HenrikDev too, rather than failing.
 
 import type { HenrikAccount, Henrik } from "./henrik.ts";
+import { log } from "./log.ts";
+import { LoginDeadError } from "./riot/login.ts";
 import type { MatchRecap } from "./recap.ts";
 import type { RrState } from "./notify/recapMessage.ts";
 import type { PdApi } from "./recapPoll.ts";
@@ -89,18 +92,23 @@ export async function nthMatch(target: Target, n: number, deps: LookupDeps): Pro
 
   if (target.kind === "person" && target.person.linked && deps.pd) {
     const pd = deps.pd;
-    const entry = asEntry(target.person);
-    const session = await pd.session(entry);
-    const history = await pd.history(session, n);
-    const h = history[n - 1];
-    if (!h) return none(target.person.riotName ?? "They");
-    const recap = await pd.details(session, h.matchId);
-    const rr: Record<string, RrState> = {};
-    if (recap.queue === "competitive") {
-      const update = (await pd.rr(session)).find((u) => u.matchId === recap.matchId);
-      rr[puuid] = update ?? "none";
+    const person = target.person;
+    try {
+      const session = await pd.session(asEntry(person));
+      const history = await pd.history(session, n);
+      const h = history[n - 1];
+      if (!h) return none(person.riotName ?? "They");
+      const recap = await pd.details(session, h.matchId);
+      const rr: Record<string, RrState> = {};
+      if (recap.queue === "competitive") {
+        const update = (await pd.rr(session)).find((u) => u.matchId === recap.matchId);
+        rr[puuid] = update ?? "none";
+      }
+      return { ok: true, value: { recap, puuid, rr } };
+    } catch (err) {
+      if (!(err instanceof LoginDeadError) || !deps.henrik) throw err;
+      log.warn("a linked person's Riot sign-in is dead; reading their match through HenrikDev", { member: person.discordUsername ?? person.discordUserId });
     }
-    return { ok: true, value: { recap, puuid, rr } };
   }
 
   if (!deps.henrik) return { ok: false, reason: "Looking up matches for people who aren't linked needs a HenrikDev key." };
