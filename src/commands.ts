@@ -8,6 +8,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  type ChatInputCommandInteraction,
   type Client,
   Events,
   LabelBuilder,
@@ -20,6 +21,7 @@ import {
 import type { Result } from "./accounts.ts";
 import { cookieDeadText } from "./alerts.ts";
 import type { StoreSkin } from "./catalog.ts";
+import { helpCommand, helpEmbed, type HelpInfo } from "./help.ts";
 import { log, redact } from "./log.ts";
 import { linkDeadText } from "./members.ts";
 import { type DiscordMessage, previewMessage, shopMessage, skinCardMessage } from "./notify/discord.ts";
@@ -85,7 +87,7 @@ export const wishlistCommand = new SlashCommandBuilder()
  */
 export async function registerCommands(client: Client<true>, guildId: string, linking = false, extra: Pick<typeof wishlistCommand, "toJSON">[] = []): Promise<void> {
   const guild = await client.guilds.fetch(guildId);
-  const commands = [shopCommand, wishlistCommand, previewCommand, ...(linking ? [linkCommand, unlinkCommand] : []), ...extra];
+  const commands = [helpCommand, shopCommand, wishlistCommand, previewCommand, ...(linking ? [linkCommand, unlinkCommand] : []), ...extra];
   await guild.commands.set(commands.map((c) => c.toJSON()));
 }
 
@@ -123,6 +125,8 @@ export interface CommandDeps {
   setWishlist(entries: string[]): Promise<void>;
   /** Current store skins from the catalog, for autocomplete. */
   storeSkins(): StoreSkin[];
+  /** What /help lists: the features this bot has switched on. */
+  help?: () => HelpInfo;
   members?: MemberCommands;
   /** The current catalog, for /preview. */
   catalog?: () => Catalog | null;
@@ -490,8 +494,15 @@ export async function handleUnlinkCommand(interaction: UnlinkInteraction, deps: 
   await interaction.editReply(plain(result.ok ? UNLINKED : result.reason));
 }
 
-// ---------- wiring ----------
+/** /help: private unless `share` is set; the owner also sees the owner-only commands. */
+export async function handleHelpCommand(interaction: ChatInputCommandInteraction, deps: CommandDeps): Promise<void> {
+  const shared = interaction.options.getBoolean("share") ?? false;
+  const info = deps.help?.() ?? { linking: false, recaps: false, shopChannelId: interaction.channelId, recapChannelId: interaction.channelId };
+  const embed = helpEmbed(info, { isOwner: interaction.user.id === deps.ownerId, shared, now: Date.now() });
+  await interaction.reply({ embeds: [embed], allowedMentions: { parse: [] }, ...(shared ? {} : { flags: MessageFlags.Ephemeral }) });
+}
 
+// ---------- wiring ----------
 export function listenForCommands(client: Client, deps: CommandDeps): void {
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
@@ -509,7 +520,8 @@ export function listenForCommands(client: Client, deps: CommandDeps): void {
         return;
       }
       if (!interaction.isChatInputCommand()) return;
-      if (interaction.commandName === "shop") await handleShopCommand(interaction, deps);
+      if (interaction.commandName === "help") await handleHelpCommand(interaction, deps);
+      else if (interaction.commandName === "shop") await handleShopCommand(interaction, deps);
       else if (interaction.commandName === "wishlist") await handleWishlistCommand(interaction, deps);
       else if (interaction.commandName === "preview") await handlePreviewCommand(interaction, deps);
       else if (interaction.commandName === "link") await handleLinkCommand(interaction, deps);

@@ -192,6 +192,12 @@ listenForCommands(client, {
       await saveState(state);
     }),
   storeSkins: () => skinList,
+  help: () => ({
+    linking: memberDeps !== null,
+    recaps: recapOn,
+    shopChannelId: config.DISCORD_CHANNEL_ID,
+    recapChannelId: config.RECAP_CHANNEL_ID ?? config.DISCORD_CHANNEL_ID,
+  }),
   members: memberCommands,
   riotName: riotNameOf,
   catalog: () => catalog,
