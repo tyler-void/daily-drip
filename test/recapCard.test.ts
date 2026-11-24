@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { CatalogNames } from "../src/catalog.ts";
-import { cardTree, loadArt, renderRecapCard } from "../src/notify/recapCard.ts";
+import { cardTree, emojiCode, loadArt, loadGlyphs, renderRecapCard } from "../src/notify/recapCard.ts";
 import type { MatchRecap, RecapPlayer } from "../src/recap.ts";
 
 const JETT = "add6443a-41bd-e414-f6ad-e58d267f4e95";
@@ -43,3 +43,31 @@ test("renders a PNG", async () => {
   expect([...png.slice(0, 4)]).toEqual([137, 80, 78, 71]);
   expect(svg).toContain("dd-grain");
 }, 60_000);
+
+test("emoji file names: code points, FE0F dropped unless the emoji joins", () => {
+  expect(emojiCode("😈")).toBe("1f608");
+  expect(emojiCode("❤️")).toBe("2764");
+  expect(emojiCode("👩‍💻")).toBe("1f469-200d-1f4bb");
+});
+
+test("missing glyphs: Han tries every CJK family, each subset under its own name; failures give nothing", async () => {
+  const asked: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.startsWith("https://fonts.googleapis.com/")) {
+      const family = new URL(url).searchParams.get("family")!;
+      asked.push(family);
+      return new Response(`src: url(https://fonts.gstatic.test/${encodeURIComponent(family)}) format('truetype');`);
+    }
+    return new Response(new Uint8Array([0, 1, 0, 0]));
+  }) as unknown as typeof fetch;
+  const fonts = await loadGlyphs(fake)("ja-JP|zh-CN|zh-TW|zh-HK", "月見草");
+  expect(asked).toEqual(["Noto Sans JP", "Noto Sans SC", "Noto Sans TC", "Noto Sans KR"]);
+  expect(Array.isArray(fonts) && fonts.map((f) => f.name)).toEqual(["Noto Sans JP 月見草", "Noto Sans SC 月見草", "Noto Sans TC 月見草", "Noto Sans KR 月見草"]);
+  const down = (async () => { throw new Error("offline"); }) as unknown as typeof fetch;
+  expect(await loadGlyphs(down)("th-TH", "ทดสอบ")).toEqual([]);
+});
+
+test("kill-scored modes say points, not rounds", () => {
+  expect(text(cardTree({ recap: { ...recap, queue: "hurm" }, tracked: ["me"], rr: {}, names }))).toContain("13 points");
+  expect(text(cardTree({ recap, tracked: ["me"], rr: {}, names }))).toContain("13 rounds");
+});

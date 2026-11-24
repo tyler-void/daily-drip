@@ -45,6 +45,8 @@ export const T = {
 } as const;
 
 export const WIDTH = 1100;
+/** Modes scored in kills or levels, not rounds. */
+const POINTS_QUEUES = new Set(["hurm", "deathmatch", "ggteam"]);
 // Satori sizes boxes the CSS default way (content-box): padding and borders sit outside a width.
 const PAD = 48;
 const BOARD_GAP = 18;
@@ -72,7 +74,7 @@ export interface CardArt {
 
 // ---------- fonts and wasm, loaded once ----------
 
-type FontSpec = { name: string; data: ArrayBuffer; weight: 400 | 500 | 600 | 800; style: "normal" };
+export type FontSpec = { name: string; data: ArrayBuffer; weight: 400 | 500 | 600 | 800; style: "normal" };
 let fontsPromise: Promise<FontSpec[]> | null = null;
 let wasmPromise: Promise<void> | null = null;
 
@@ -102,6 +104,82 @@ function wasm(): Promise<void> {
     await initWasm(await readFile(path));
   })();
   return wasmPromise;
+}
+
+// ---------- characters the bundled fonts don't have ----------
+// Riot IDs can be in any script (CJK, Thai, symbols, emoji). Satori asks for what it can't draw; the
+// glyphs come from Google Fonts' Noto families, subset to just those characters, and emoji from
+// Twemoji. Cached for the process; a failure only leaves that character as a box.
+
+const NOTO: Record<string, string> = {
+  "ja-JP": "Noto Sans JP",
+  "ko-KR": "Noto Sans KR",
+  "zh-CN": "Noto Sans SC",
+  "zh-TW": "Noto Sans TC",
+  "zh-HK": "Noto Sans HK",
+  "th-TH": "Noto Sans Thai",
+  "ar-AR": "Noto Sans Arabic",
+  "he-IL": "Noto Sans Hebrew",
+  "bn-IN": "Noto Sans Bengali",
+  "ta-IN": "Noto Sans Tamil",
+  "te-IN": "Noto Sans Telugu",
+  "ml-IN": "Noto Sans Malayalam",
+  devanagari: "Noto Sans Devanagari",
+  kannada: "Noto Sans Kannada",
+  symbol: "Noto Sans Symbols 2",
+  math: "Noto Sans Math",
+  unknown: "Noto Sans",
+};
+
+const CJK = ["Noto Sans JP", "Noto Sans SC", "Noto Sans TC", "Noto Sans KR"];
+
+/**
+ * The families to try for a segment, best first. Han characters are shared between Chinese,
+ * Japanese and Korean, and Satori's guess at the language can miss, so CJK and anything unknown
+ * get the whole CJK set; Google leaves out a family that has none of the characters.
+ */
+function familiesFor(languageCode: string): string[] {
+  // Ambiguous Han characters come as "ja-JP|zh-CN|zh-TW|zh-HK".
+  const lang = languageCode.split("|")[0] ?? languageCode;
+  const first = NOTO[lang] ?? "Noto Sans";
+  if (CJK.includes(first)) return [first, ...CJK.filter((f) => f !== first)];
+  if (lang === "unknown") return ["Noto Sans", ...CJK, "Noto Sans Symbols 2", "Noto Sans Math"];
+  return [first];
+}
+
+const glyphCache = new Map<string, Promise<FontSpec[] | string>>();
+
+/** A Noto family subset to `text`, as TTF (Google serves TTF to clients that don't ask for WOFF2). */
+async function notoSubset(family: string, text: string, fetchFn: typeof fetch): Promise<FontSpec[]> {
+  const css = await (await fetchFn(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(8000) })).text();
+  const url = css.match(/src: url\((.+?)\) format\('(?:opentype|truetype)'\)/)?.[1];
+  if (!url) return [];
+  const res = await fetchFn(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return [];
+  // Each subset holds only its own characters, so it needs its own name: two subsets under one
+  // name would replace each other.
+  return [{ name: `${family} ${text}`, data: await res.arrayBuffer(), weight: 400, style: "normal" }];
+}
+
+/** Twemoji's file name for an emoji: its code points in hex, without FE0F unless it joins (ZWJ). */
+export function emojiCode(emoji: string): string {
+  const cps = [...emoji].map((c) => (c.codePointAt(0) as number).toString(16));
+  return (emoji.includes("\u200d") ? cps : cps.filter((c) => c !== "fe0f")).join("-");
+}
+
+export function loadGlyphs(fetchFn: typeof fetch = fetch) {
+  return (languageCode: string, segment: string): Promise<FontSpec[] | string> => {
+    const key = `${languageCode}\u0000${segment}`;
+    let found = glyphCache.get(key);
+    if (!found) {
+      found =
+        languageCode === "emoji"
+          ? fetchImage(`https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/svg/${emojiCode(segment)}.svg`, fetchFn).then((d) => d ?? "")
+          : Promise.all(familiesFor(languageCode).map((f) => notoSubset(f, segment, fetchFn).catch(() => []))).then((all) => all.flat());
+      glyphCache.set(key, found);
+    }
+    return found;
+  };
 }
 
 // ---------- images ----------
@@ -248,7 +326,7 @@ export function cardTree(input: CardInput): Node {
       { flexDirection: "column", width: BOARD_WIDTH, gap: 6, padding: `20px ${BOARD_PAD}px`, borderRadius: 26, backgroundColor: T.glassFillStrong, border: `1px solid ${T.glassEdge}` },
       el("div", { justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
         overline(label),
-        el("div", { ...mono, fontSize: 18, fontWeight: 600, color: team?.won ? T.success : T.inkMuted }, team ? `${team.roundsWon} rounds` : ""),
+        el("div", { ...mono, fontSize: 18, fontWeight: 600, color: team?.won ? T.success : T.inkMuted }, team ? `${team.roundsWon} ${POINTS_QUEUES.has(recap.queue) ? "points" : "rounds"}` : ""),
       ),
       ...teamByAcs(recap, teamId).map((p) => {
         const isTracked = tracked.includes(p.puuid);
@@ -328,7 +406,7 @@ export async function renderRecapCard(input: CardInput, scale = 1): Promise<{ sv
   const [loadedFonts] = await Promise.all([fonts(), wasm()]);
   const tree = cardTree(input);
   // Satori needs a height: measure first at a generous one, then trim to the content.
-  const svg0 = await satori(tree as never, { width: WIDTH, fonts: loadedFonts });
+  const svg0 = await satori(tree as never, { width: WIDTH, fonts: loadedFonts, loadAdditionalAsset: loadGlyphs() as never });
   const height = Number(svg0.match(/height="(\d+(?:\.\d+)?)"/)?.[1] ?? 900);
   const svg = compose(svg0, WIDTH, height, input.art?.map ?? null);
   const png = new Resvg(svg, { fitTo: { mode: "zoom", value: scale }, background: T.ground }).render().asPng();
