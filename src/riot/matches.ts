@@ -3,6 +3,7 @@
 // confirmed by spike S2 on 2026-11-25.
 
 import type { Http } from "../http.ts";
+import { log } from "../log.ts";
 import { type MatchRecap, recapFromMatchDetails } from "../recap.ts";
 import { parseRetryAfter, RateLimitedError, type Session, UnexpectedResponseError } from "./auth.ts";
 import { BadClaimsError, gameHeaders, MaintenanceError } from "./store.ts";
@@ -34,6 +35,7 @@ const pd = (session: Session) => `https://pd.${session.shard}.a.pvp.net`;
 export const historyUrl = (session: Session, puuid: string, count = 5) =>
   `${pd(session)}/match-history/v1/history/${puuid}?startIndex=0&endIndex=${count}`;
 export const detailsUrl = (session: Session, matchId: string) => `${pd(session)}/match-details/v1/matches/${matchId}`;
+export const nameServiceUrl = (session: Session) => `${pd(session)}/name-service/v2/players`;
 export const competitiveUpdatesUrl = (session: Session, puuid: string, count = 5) =>
   `${pd(session)}/mmr/v1/players/${puuid}/competitiveupdates?startIndex=0&endIndex=${count}&queue=competitive`;
 
@@ -47,12 +49,44 @@ export async function fetchHistory(http: Http, session: Session, clientVersion: 
   });
 }
 
-/** E11: everything in a recap. Throws MatchNotReadyError while Riot doesn't have it yet. */
+/**
+ * E11: everything in a recap. Throws MatchNotReadyError while Riot doesn't have it yet. E11 leaves
+ * players' names blank, so they are filled in from the name service; if that fails, the recap goes
+ * out without them.
+ */
 export async function fetchMatchDetails(http: Http, session: Session, clientVersion: string, matchId: string): Promise<MatchRecap> {
   const body = await get(http, detailsUrl(session, matchId), session, clientVersion, "E11 match details");
   const recap = recapFromMatchDetails(body);
   if (!recap) throw new UnexpectedResponseError("E11 match details: not a match");
+  const missing = recap.players.filter((p) => !p.riotName).map((p) => p.puuid);
+  if (missing.length) {
+    const names = await fetchNames(http, session, clientVersion, missing).catch((err: unknown) => {
+      log.warn("could not look up the players' names", { error: err });
+      return {} as Record<string, string>;
+    });
+    for (const p of recap.players) p.riotName ??= names[p.puuid] ?? null;
+  }
   return recap;
+}
+
+/** E13, the name service: Riot IDs ("Name#TAG") by PUUID. Players Riot returns no name for are left out. */
+export async function fetchNames(http: Http, session: Session, clientVersion: string, puuids: string[]): Promise<Record<string, string>> {
+  const res = await http.request(nameServiceUrl(session), {
+    method: "PUT",
+    headers: { ...gameHeaders(session, clientVersion), "Content-Type": "application/json" },
+    body: JSON.stringify(puuids),
+    timeoutMs: 15_000,
+  });
+  if (res.status === 429) throw new RateLimitedError("E13 name service", parseRetryAfter(res.headers.get("retry-after")));
+  if (res.status !== 200) throw new UnexpectedResponseError(`E13 name service returned ${res.status}`);
+  const body: unknown = await res.json();
+  const out: Record<string, string> = {};
+  for (const entry of Array.isArray(body) ? body : []) {
+    const e = entry as Record<string, unknown>;
+    if (typeof e?.Subject !== "string" || typeof e.GameName !== "string" || !e.GameName) continue;
+    out[e.Subject] = typeof e.TagLine === "string" && e.TagLine ? `${e.GameName}#${e.TagLine}` : e.GameName;
+  }
+  return out;
 }
 
 /** E12: RR changes for the session's own account (Riot only returns your own). */

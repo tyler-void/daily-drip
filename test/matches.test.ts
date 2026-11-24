@@ -9,6 +9,7 @@ import {
   fetchRrUpdates,
   historyUrl,
   MatchNotReadyError,
+  nameServiceUrl,
 } from "../src/riot/matches.ts";
 import { BadClaimsError, MaintenanceError } from "../src/riot/store.ts";
 
@@ -68,4 +69,36 @@ test("errors: 401 and BAD_CLAIMS are stale sessions, 404 is not ready yet, 429 a
   await expect(fetchHistory(http(429, {}, { "retry-after": "60" }).http, session, VERSION)).rejects.toBeInstanceOf(RateLimitedError);
   await expect(fetchHistory(http(503, { errorCode: "SCHEDULED_DOWNTIME" }).http, session, VERSION)).rejects.toBeInstanceOf(MaintenanceError);
   await expect(fetchHistory(http(500, "oops").http, session, VERSION)).rejects.toBeInstanceOf(UnexpectedResponseError);
+});
+
+test("E11's blank names are filled from the name service (E13); if it fails, the recap still comes back", async () => {
+  const match = {
+    matchInfo: { matchId: "m-1", mapId: "/Game/Maps/Ascent/Ascent", queueID: "unrated", isCompleted: true, gameStartMillis: 0, gameLengthMillis: 0 },
+    players: ["p-owner", "p-mate", "p-hidden"].map((subject) => ({ subject, gameName: "", tagLine: "", teamId: "Blue", characterId: "x", competitiveTier: 3, stats: { score: 100, roundsPlayed: 1, kills: 1, deaths: 0, assists: 0 } })),
+    teams: [],
+    roundResults: [],
+  };
+  const calls: { url: string; options: RequestOptions }[] = [];
+  const routed = (names: number): Http => ({
+    async request(url, options = {}) {
+      calls.push({ url, options });
+      if (url === nameServiceUrl(session)) {
+        const list = [
+          { Subject: "p-owner", GameName: "Tyler", TagLine: "0001" },
+          { Subject: "p-mate", GameName: "Mate", TagLine: "VN2" },
+          { Subject: "p-hidden", GameName: "", TagLine: "" },
+        ];
+        return new Response(JSON.stringify(list), { status: names });
+      }
+      return new Response(JSON.stringify(match), { status: 200 });
+    },
+  });
+  const recap = await fetchMatchDetails(routed(200), session, VERSION, "m-1");
+  expect(recap.players.map((p) => p.riotName)).toEqual(["Tyler#0001", "Mate#VN2", null]);
+  const put = calls.find((c) => c.url === nameServiceUrl(session))!;
+  expect(put.options.method).toBe("PUT");
+  expect(JSON.parse(put.options.body!)).toEqual(["p-owner", "p-mate", "p-hidden"]);
+  expect(put.options.headers?.["X-Riot-Entitlements-JWT"]).toBe("ENT");
+  const without = await fetchMatchDetails(routed(500), session, VERSION, "m-1");
+  expect(without.players.map((p) => p.riotName)).toEqual([null, null, null]);
 });
