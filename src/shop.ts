@@ -12,6 +12,7 @@ import {
   resolveGameVersion,
   saveCatalog,
 } from "./catalog.ts";
+import type { Http } from "./http.ts";
 import { log } from "./log.ts";
 import { type AuthDeps, authenticate, type Session, UnexpectedResponseError } from "./riot/auth.ts";
 import { BadClaimsError, fetchOfferPrices, fetchStorefront, type Storefront } from "./riot/store.ts";
@@ -35,6 +36,14 @@ export interface ShopSnapshot {
 
 export interface ShopDeps extends AuthDeps {
   catalogFile?: string;
+}
+
+/** Where a shop run gets its session: the owner's cookie, or a member's refresh token. */
+export interface ShopSource {
+  http: Http;
+  catalogFile?: string;
+  /** A fresh session. Called once more if E6 answers BAD_CLAIMS. */
+  session(): Promise<Session>;
 }
 
 const TEN_MINUTES = 10 * 60 * 1000;
@@ -77,14 +86,29 @@ export function buildSnapshot(
   };
 }
 
-/** One run. Saves the snapshot in state; throws the typed errors the scheduler reacts to. */
+/** The owner's run. Saves the snapshot in state; throws the typed errors the scheduler reacts to. */
 export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
-  const { http, state } = deps;
-  const catalogFile = deps.catalogFile ?? DEFAULT_CATALOG_FILE;
+  const { state } = deps;
+  const snapshot = await fetchSnapshot({ http: deps.http, catalogFile: deps.catalogFile, session: () => authenticate(deps) });
+  // A successful run clears every alert flag (spec: Storage & secrets).
+  state.snapshot = snapshot;
+  state.lastSuccessAt = snapshot.fetchedAt;
+  state.flags = noAlerts();
+  await deps.save(state);
+  return snapshot;
+}
+
+/**
+ * Session -> E6 -> catalog -> ShopSnapshot, with the "retry once" rows of the error table. Works for
+ * any session source and saves nothing; the caller stores the snapshot where it belongs.
+ */
+export async function fetchSnapshot(source: ShopSource): Promise<ShopSnapshot> {
+  const { http } = source;
+  const catalogFile = source.catalogFile ?? DEFAULT_CATALOG_FILE;
   const cached = await loadCatalog(catalogFile);
 
   let gameVersion = await resolveGameVersion(http, cached);
-  let session = await authenticate(deps);
+  let session = await source.session();
 
   let storefront: Storefront | undefined;
   let retries = 0;
@@ -100,7 +124,7 @@ export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
         log.warn("E6 answered BAD_CLAIMS; reauthenticating once");
         reauthed = true;
         retries++;
-        session = await authenticate(deps);
+        session = await source.session();
         continue;
       }
       if (err instanceof UnexpectedResponseError && !versionRefetched) {
@@ -119,20 +143,13 @@ export async function fetchShop(deps: ShopDeps): Promise<ShopSnapshot> {
   }
 
   const catalog = await refreshCatalog(http, gameVersion, cached, catalogFile);
-  const fallbackPrices = await pricesIfMissing(deps, storefront, catalog, session, gameVersion.riotClientVersion, catalogFile);
-  const snapshot = buildSnapshot(storefront, catalog, fallbackPrices);
-
-  // A successful run clears every alert flag (spec: Storage & secrets).
-  state.snapshot = snapshot;
-  state.lastSuccessAt = snapshot.fetchedAt;
-  state.flags = noAlerts();
-  await deps.save(state);
-  return snapshot;
+  const fallbackPrices = await pricesIfMissing(http, storefront, catalog, session, gameVersion.riotClientVersion, catalogFile);
+  return buildSnapshot(storefront, catalog, fallbackPrices);
 }
 
 /** E7, only when E6 lacks a price; cached in the catalog for this game version. */
 async function pricesIfMissing(
-  deps: ShopDeps,
+  http: Http,
   storefront: Storefront,
   catalog: Catalog | null,
   session: Session,
@@ -143,7 +160,7 @@ async function pricesIfMissing(
   if (catalog?.prices) return catalog.prices;
   log.warn("E6 has no price for some offers; falling back to E7");
   try {
-    const prices = await fetchOfferPrices(deps.http, session, clientVersion);
+    const prices = await fetchOfferPrices(http, session, clientVersion);
     if (catalog) await saveCatalog({ ...catalog, prices }, catalogFile);
     return prices;
   } catch (err) {

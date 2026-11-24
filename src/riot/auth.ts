@@ -171,7 +171,31 @@ export async function authenticate(deps: AuthDeps): Promise<Session> {
   for (const value of Object.values(state.cookie.jar)) addSecret(value);
   await deps.save(state);
 
-  const { accessToken, idToken } = outcome;
+  // Steps 4-6 (a new cookie file cleared the PUUID and shard, so they are fetched again).
+  const { session, cacheChanged } = await completeSession(http, outcome, state, deps.shardOverride);
+  if (cacheChanged) await deps.save(state);
+  return session;
+}
+
+/** Where completeSession keeps the PUUID and shard between runs: the owner's state, or a member's record. */
+export interface SessionCache {
+  puuid: string | null;
+  shard: string | null;
+}
+
+/**
+ * Auth flow, steps 4-6, for any access and ID token, whether it came from the owner's cookie or a
+ * member's refresh token: E2 entitlements every time, then E3 and E4 only when the cache lacks the
+ * PUUID or the shard. Fills the cache; the caller saves it when `cacheChanged`. `riotName` is set
+ * only when E3 ran.
+ */
+export async function completeSession(
+  http: Http,
+  tokens: { accessToken: string; idToken: string },
+  cache: SessionCache,
+  shardOverride?: string,
+): Promise<{ session: Session; cacheChanged: boolean; riotName: string | null }> {
+  const { accessToken, idToken } = tokens;
   const bearer = { Authorization: `Bearer ${accessToken}` };
   const jsonHeaders = { ...bearer, "Content-Type": "application/json" };
 
@@ -179,17 +203,22 @@ export async function authenticate(deps: AuthDeps): Promise<Session> {
   const e2 = await expectJson(await http.request(ENTITLEMENTS_URL, { method: "POST", headers: jsonHeaders }), "E2 entitlements");
   const entitlementsToken = text(e2.entitlements_token);
   if (!entitlementsToken) throw new UnexpectedResponseError("E2 entitlements: no entitlements_token");
+  addSecret(entitlementsToken);
 
-  // E3 and E4 only when not cached; a new cookie file clears both.
   let cacheChanged = false;
-  if (!state.puuid) {
+  let riotName: string | null = null;
+  if (!cache.puuid) {
     const e3 = await expectJson(await http.request(USERINFO_URL, { headers: bearer }), "E3 userinfo");
     const puuid = text(e3.sub);
     if (!puuid) throw new UnexpectedResponseError("E3 userinfo: no sub (PUUID)");
-    state.puuid = puuid;
+    cache.puuid = puuid;
     cacheChanged = true;
+    const acct = e3.acct as Record<string, unknown> | undefined;
+    const gameName = text(acct?.game_name);
+    const tagLine = text(acct?.tag_line);
+    if (gameName) riotName = tagLine ? `${gameName}#${tagLine}` : gameName;
   }
-  let shard = deps.shardOverride ?? state.shard;
+  let shard = shardOverride ?? cache.shard;
   if (!shard) {
     const e4 = await expectJson(
       await http.request(PAS_URL, { method: "PUT", headers: jsonHeaders, body: JSON.stringify({ id_token: idToken }) }),
@@ -199,12 +228,11 @@ export async function authenticate(deps: AuthDeps): Promise<Session> {
     const region = text(affinities?.live);
     if (!region) throw new UnexpectedResponseError("E4 PAS: no affinities.live");
     shard = regionToShard(region);
-    state.shard = shard;
+    cache.shard = shard;
     cacheChanged = true;
   }
-  if (cacheChanged) await deps.save(state);
 
-  return { accessToken, idToken, entitlementsToken, puuid: state.puuid, shard };
+  return { session: { accessToken, idToken, entitlementsToken, puuid: cache.puuid, shard }, cacheChanged, riotName };
 }
 
 async function expectJson(res: Response, what: string): Promise<Record<string, unknown>> {
