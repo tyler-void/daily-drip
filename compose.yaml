@@ -22,6 +22,7 @@ services:
       RIOT_SHARD: ${RIOT_SHARD:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
+      TOKEN_KEY: ${TOKEN_KEY:-}
       TZ: ${TZ:-UTC}
     volumes:
       - daily-drip-data:/app/data

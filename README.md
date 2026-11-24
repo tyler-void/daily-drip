@@ -15,8 +15,9 @@ It is read-only, and it needs neither the game nor the Riot Client running.
 | `/shop` | Today's shop, on demand. Answered from the last fetch until the shop resets |
 | `/wishlist add` | Pick a gun, then one of its current skins (both autocomplete), or "Any weapon" with part of a name: "Reaver" matches every Reaver skin |
 | `/wishlist remove`, `list`, `clear` | Manage the wishlist; `list` marks entries that are in today's shop |
+| `/link`, `/unlink` | Other members link or unlink their own Riot account (only when linking is on, see below) |
 
-Both commands answer only the bot's owner.
+`/shop` and `/wishlist` answer the owner, and linked members about their own account.
 
 ## How it works
 
@@ -51,6 +52,14 @@ On the server, in the folder that holds `compose.yaml`:
 From another machine, `DEPLOY_HOST=<ssh name> scripts/deploy.sh` copies the code over SSH, builds the image on the server and restarts the container. It never touches the server's `.env` or `config/`.
 
 To replace the cookie later, overwrite `config/riot-cookie`; the bot notices within a minute. To change a variable, edit `.env` and run `docker compose up -d` again.
+
+## Let friends link their own account
+
+Optional. Set `TOKEN_KEY` (`openssl rand -base64 32`) in `.env` and restart: `/link` and `/unlink` appear in your server.
+
+A friend runs `/link`, presses **Sign in with Riot**, and signs in on Riot's own page. Their browser then lands on a `http://localhost/redirect?code=…` page that doesn't load; they copy that address and paste it into the form. The bot trades the one-time code for a sign-in token, keeps it encrypted with `TOKEN_KEY`, and from then on DMs them their shop after each reset. `/unlink` deletes it.
+
+Nobody types a password or a cookie into Discord. Still, the server ends up holding a sign-in to each friend's account, so only offer this to people who trust you with that, and keep it to a few. At most 10 members can link. Losing `TOKEN_KEY` means everyone links again.
 
 ## Development
 

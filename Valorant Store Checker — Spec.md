@@ -217,7 +217,16 @@ Ruled out:
 - **Pasting a cookie into Discord.** Discord can read message and modal contents, a modal input holds at most 4,000 characters, and the cookie is a long-lived key that gets around 2FA.
 - **A web form behind the Cloudflare tunnel.** TLS ends at Cloudflare, so Cloudflare could read what is sent.
 
-**Not done yet:** `/link` (the link and the modal) and `/unlink`, each member's own shop runs, wishlist and alerts, and encrypting refresh tokens at rest with a key kept outside the data volume.
+**Built** (on with `TOKEN_KEY`; without it the bot serves only the owner):
+
+- `/link` answers privately with the steps, a "Sign in with Riot" button and a "Paste the address" button that opens a form. `/unlink` deletes the member's entry: sign-in token, shop and wishlist. It can't end the Riot sign-in itself, so the reply points to "Sign out of all devices" in the Riot account settings.
+- `/shop` and `/wishlist` answer a linked member about their own account, privately. Anyone else who isn't the owner is told to `/link`.
+- Each member's shop runs 90 s after their reset, members one after another, 5 s apart, under the shared run lock (`src/memberScheduler.ts`). A rate limit or a Cloudflare block stops the round for everyone.
+- Members get their shop and wishlist hits by DM. If they block DMs from server members, one note in the channel says how to fix it; their shop is never posted there.
+- A dead sign-in (`invalid_grant`) DMs the member once to link again, then pauses their runs until they do.
+- Refresh tokens are sealed with AES-256-GCM (`src/secretbox.ts`). The key, `TOKEN_KEY` (32 random bytes, base64), lives in `.env`, outside the data volume: a leaked `state.json` or backup alone can't be used. It doesn't protect against the key's holder or root on the server, since the bot decrypts the token to use it unattended. Losing the key means every member links again.
+
+**Not checked yet:** a real member linking through Discord, a member's daily DM after a reset, and how long a refresh token keeps working.
 
 ## Error handling
 
