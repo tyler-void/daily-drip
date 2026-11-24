@@ -65,6 +65,7 @@ export const LEVEL_UNKNOWN = "dddddddd-0000-0000-0000-000000000001";
 export const THEME_IMPERIUM = "11111111-0000-0000-0000-000000000001";
 export const THEME_CELESTIAL = "11111111-0000-0000-0000-000000000002";
 export const VANDAL_VIDEO = "https://video.example/imperium-vandal-level1.mp4";
+export const VANDAL_VIDEO_TOP = "https://video.example/imperium-vandal-level2.mp4";
 
 export const themesData = [
   { uuid: THEME_IMPERIUM, displayName: "Imperium" },
@@ -83,7 +84,7 @@ export const weaponsData = [
         chromas: [{ fullRender: "https://media.example/vandal-chroma.png" }],
         levels: [
           { uuid: LEVEL_VANDAL, displayName: "Imperium Vandal", displayIcon: "https://media.example/vandal-level1.png", streamedVideo: VANDAL_VIDEO },
-          { uuid: LEVEL_VANDAL_2, displayName: "Imperium Vandal Level 2", displayIcon: null },
+          { uuid: LEVEL_VANDAL_2, displayName: "Imperium Vandal Level 2", displayIcon: null, streamedVideo: VANDAL_VIDEO_TOP },
         ],
       },
       { displayName: "Standard Vandal", contentTierUuid: null, displayIcon: "https://media.example/std.png", chromas: [], levels: [{ uuid: "std-level", displayIcon: null }] },

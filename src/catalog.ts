@@ -16,7 +16,7 @@ export const TIERS_URL = "https://valorant-api.com/v1/contenttiers";
 export const THEMES_URL = "https://valorant-api.com/v1/themes";
 export const DEFAULT_CATALOG_FILE = "data/catalog.json";
 /** Bump when the cached shape changes, so an older catalog.json is fetched again. */
-export const CATALOG_SCHEMA = 3;
+export const CATALOG_SCHEMA = 4;
 
 export interface GameVersion {
   version: string;
@@ -32,7 +32,7 @@ export interface CatalogSkin {
   tier: string | null;
   /** The collection (valorant-api.com theme), e.g. "Reaver"; null when unknown. */
   collection: string | null;
-  /** Riot's preview video for this level, or the first level of the skin that has one. */
+  /** Riot's preview video of the skin's fully upgraded level (the last level that has one). */
   video: string | null;
 }
 
@@ -102,12 +102,11 @@ export function buildCatalogEntries(weapons: unknown, tiers: unknown, themes: un
       const themeUuid = text(field(skin, "themeUuid"));
       const collection = themeUuid ? (themeNames.get(themeUuid) ?? null) : null;
       const levels = asArray(field(skin, "levels"));
-      const anyVideo = levels.map((l) => text(field(l, "streamedVideo"))).find((v) => v !== null) ?? null;
+      // The shop sells level 1, whose video shows the base model; the last level's shows every upgrade.
+      const video = levels.map((l) => text(field(l, "streamedVideo"))).findLast((v) => v !== null) ?? null;
       for (const level of levels) {
         const uuid = text(field(level, "uuid"));
-        if (!uuid) continue;
-        const video = text(field(level, "streamedVideo")) ?? anyVideo;
-        skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier, collection, video };
+        if (uuid) skins[uuid] = { name, weapon: weaponName, icon: text(field(level, "displayIcon")) ?? skinIcon, tier, collection, video };
       }
     }
   }

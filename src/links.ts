@@ -17,7 +17,7 @@ const USER_AGENT = "daily-drip (self-hosted Discord shop bot)";
 export interface OfferLinks {
   fandom: string;
   trailer: string;
-  /** Riot's in-game preview video; null when the skin has none. */
+  /** Riot's in-game preview video of the fully upgraded skin; null when the skin has none. */
   preview: string | null;
 }
 

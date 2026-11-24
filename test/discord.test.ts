@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { cookieDeadText } from "../src/alerts.ts";
 import type { Client } from "discord.js";
-import { alertMessage, CANNOT_DM, createPersonNotifier, DM_BLOCKED_NOTE, inviteUrl, shopMessage, wishlistMessage } from "../src/notify/discord.ts";
+import { alertMessage, CANNOT_DM, createPersonNotifier, DM_BLOCKED_NOTE, inviteUrl, previewMessage, shopMessage, wishlistMessage } from "../src/notify/discord.ts";
 import type { ShopSnapshot } from "../src/shop.ts";
 
 const OWNER = "123456789012345678";
@@ -124,10 +124,30 @@ describe("createPersonNotifier", () => {
     expect(sent[1]?.allowedMentions).toEqual({ users: [PERSON] });
   });
 
-  test("no wishlist hit: only the channel post", async () => {
+  test("no wishlist hit and no preview videos: only the channel post", async () => {
     const { client, sent } = fakeClient();
     await createPersonNotifier(client, CHANNEL, PERSON, "dm").sendShop(snapshot, []);
     expect(sent.map((m) => m.to)).toEqual([`channel:${CHANNEL}`]);
+  });
+
+  test("preview videos follow the shop post as a second channel message", async () => {
+    const { client, sent } = fakeClient();
+    await createPersonNotifier(client, CHANNEL, PERSON, "dm").sendShop(withVideo, []);
+    expect(sent.map((m) => m.to)).toEqual([`channel:${CHANNEL}`, `channel:${CHANNEL}`]);
+    expect(sent[1]?.content).toBe("Imperium Vandal (fully upgraded)\nhttps://v.example/imperium-top.mp4");
+  });
+
+  test("a failed preview message doesn't fail the post (which would make it be posted again)", async () => {
+    const { client, sent } = fakeClient();
+    const channels = (client as any).channels;
+    let n = 0;
+    const original = channels.fetch;
+    channels.fetch = async (id: string) => {
+      const ch = await original(id);
+      return { ...ch, send: async (m: any) => (++n === 2 ? Promise.reject(new Error("Discord 500")) : ch.send(m)) };
+    };
+    await createPersonNotifier(client, CHANNEL, PERSON, "dm").sendShop(withVideo, []);
+    expect(sent).toHaveLength(1);
   });
 
   test("blocked DMs: one note in the channel that names no skin, and the shop is still posted", async () => {
@@ -177,4 +197,24 @@ describe("shopMessage links", () => {
   test("an unknown item, or a snapshot saved before links, has no links at all", () => {
     expect(embeds[2]).toEqual({ title: "b", description: "Price unknown" });
   });
+});
+
+const withVideo: ShopSnapshot = {
+  ...snapshot,
+  offers: [
+    { ...snapshot.offers[0]!, links: { fandom: "https://f.example", trailer: "https://y.example", preview: "https://v.example/imperium-top.mp4" } },
+    { ...snapshot.offers[0]!, name: "No *Video*", links: { fandom: "https://f.example", trailer: "https://y.example", preview: null } },
+    snapshot.offers[1]!,
+  ],
+};
+
+test("previewMessage lists only skins with a video, names escaped, and pings no one", () => {
+  expect(previewMessage(withVideo)).toEqual({
+    content: "Imperium Vandal (fully upgraded)\nhttps://v.example/imperium-top.mp4",
+    embeds: [],
+    allowedMentions: { parse: [] },
+  });
+  const escaped = previewMessage({ ...withVideo, offers: [{ ...withVideo.offers[1]!, links: { ...withVideo.offers[1]!.links!, preview: "https://v.example/x.mp4" } }] });
+  expect(escaped?.content).toStartWith("No \\*Video\\* (fully upgraded)");
+  expect(previewMessage(snapshot)).toBeNull();
 });

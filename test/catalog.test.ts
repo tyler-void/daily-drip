@@ -17,7 +17,7 @@ import {
   THEMES_URL,
 } from "../src/catalog.ts";
 import { FANDOM_API } from "../src/links.ts";
-import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO, versionRoute, weaponsData } from "./fakes.ts";
+import { fakeHttp, GAME_VERSION, LEVEL_BULLDOG, LEVEL_JUDGE, LEVEL_VANDAL, LEVEL_VANDAL_2, themesData, TIER_EXCLUSIVE, tiersData, VANDAL_VIDEO_TOP, versionRoute, weaponsData } from "./fakes.ts";
 
 describe("buildCatalogEntries", () => {
   const { skins, tiers } = buildCatalogEntries(weaponsData, tiersData, themesData);
@@ -29,13 +29,13 @@ describe("buildCatalogEntries", () => {
       icon: "https://media.example/vandal-level1.png",
       tier: TIER_EXCLUSIVE,
       collection: "Imperium",
-      video: VANDAL_VIDEO,
+      video: VANDAL_VIDEO_TOP,
     });
     expect(skins[LEVEL_VANDAL_2]?.name).toBe("Imperium Vandal");
   });
 
-  test("a level without a video uses the skin's first video; a skin without any has none", () => {
-    expect(skins[LEVEL_VANDAL_2]?.video).toBe(VANDAL_VIDEO);
+  test("every level gets the fully upgraded (last) level's video; a skin without any has none", () => {
+    expect(skins[LEVEL_VANDAL_2]?.video).toBe(VANDAL_VIDEO_TOP);
     expect(skins[LEVEL_JUDGE]?.video).toBeNull();
     expect(skins[LEVEL_JUDGE]?.collection).toBe("Celestial");
   });

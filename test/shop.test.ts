@@ -20,7 +20,7 @@ import {
   storefrontBody,
   themesData,
   tiersData,
-  VANDAL_VIDEO,
+  VANDAL_VIDEO_TOP,
   versionRoute,
   weaponsData,
 } from "./fakes.ts";
@@ -61,7 +61,7 @@ describe("buildSnapshot", () => {
       links: {
         fandom: "https://valorant.fandom.com/wiki/Imperium_Collection",
         trailer: "https://www.youtube.com/results?search_query=VALORANT+Imperium+skins+trailer",
-        preview: VANDAL_VIDEO,
+        preview: VANDAL_VIDEO_TOP,
       },
     });
     // No Fandom page and no video: a Fandom search, and no preview.

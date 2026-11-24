@@ -11,6 +11,7 @@ import {
   PermissionFlagsBits,
   PermissionsBitField,
 } from "discord.js";
+import { log } from "../log.ts";
 import type { ShopOffer, ShopSnapshot } from "../shop.ts";
 import type { Notifier } from "./notifier.ts";
 
@@ -116,6 +117,16 @@ export async function startDiscord(token: string): Promise<Client<true>> {
   return ready;
 }
 
+/**
+ * The previews that follow a shop post: each skin's name, then its Riot preview video URL on its own
+ * line. A bot can't put a video inside an embed, but Discord turns a bare video link into a player.
+ * Null when no skin in the shop has a video.
+ */
+export function previewMessage(snapshot: ShopSnapshot): DiscordMessage | null {
+  const lines = snapshot.offers.flatMap((o) => (o.links?.preview ? [`${escapeMarkdown(o.name)} (fully upgraded)`, o.links.preview] : []));
+  return lines.length > 0 ? { content: lines.join("\n"), embeds: [], allowedMentions: { parse: [] } } : null;
+}
+
 /** Discord's error code when a user doesn't accept DMs from the bot. */
 export const CANNOT_DM = 50007;
 
@@ -168,7 +179,11 @@ export function createPersonNotifier(
     async sendShop(snapshot, wishlistHits) {
       // The private hit first: if the public post fails and is retried, a repeated DM is the lesser harm.
       if (wishlistHits.length > 0) await dm(wishlistMessage(wishlistHits, userId));
-      await (await channel()).send(shopMessage(snapshot, { userId, ping: true, riotName: riotName() }));
+      const target = await channel();
+      await target.send(shopMessage(snapshot, { userId, ping: true, riotName: riotName() }));
+      // Best-effort: the shop is already posted, and a failure here must not make the caller post it again.
+      const previews = previewMessage(snapshot);
+      if (previews) await target.send(previews).catch((err: unknown) => log.warn("could not post the preview videos", { error: err }));
     },
     async sendAlert(text) {
       if (alerts === "channel") {
