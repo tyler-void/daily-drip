@@ -309,7 +309,7 @@ export function wishlistChoices(option: string, typed: string, weapon: string | 
 export const LINK_STEPS = [
   "**Link your Riot account**",
   "1. Press **Sign in with Riot**. It opens Riot's own sign-in page: sign in there, never in Discord.",
-  "2. Your browser then lands on a page that fails to load. Copy its whole address: it starts with `http://localhost/redirect?` and contains `code=`.",
+  "2. Your browser then lands on a page that fails to load. Copy its whole address: click the address bar, then Ctrl+A and Ctrl+C (on a phone: tap the address bar, select all, Copy). It starts with `localhost/redirect?` and contains `code=`.",
   "3. Press **Paste the address** and paste it within a few minutes.",
   "",
   "After each reset, your shop is posted in this server's shop channel, for everyone to see, and pings you. Your wishlist stays private: hits come to you by DM.",

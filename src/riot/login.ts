@@ -42,20 +42,44 @@ export function buildSignInUrl(nonce: string = randomUUID()): string {
 }
 
 /**
- * The one-time code from a pasted redirect address. http and https are both accepted: a browser in
- * HTTPS-only mode rewrites http://localhost before the dead page fails. Returns null if the text is
- * not a localhost/redirect address carrying a code.
+ * The one-time code from what a member pastes. Lenient on purpose, because a code only works at
+ * Riot's token endpoint for this one sign-in, so accepting it in any shape risks nothing:
+ *
+ * - the whole address, http or https (a browser in HTTPS-only mode rewrites http://localhost);
+ * - the address without "http://", which browsers drop when part of the bar is selected by hand;
+ * - a piece of it containing "code=…";
+ * - the code on its own.
+ *
+ * Refused: text with no code in it, and anything that looks like a JWT (a cookie or token pasted by
+ * mistake), so it isn't sent to Riot as a code.
  */
 export function extractCode(pasted: string): string | null {
-  let url: URL;
+  const text = pasted.trim();
+  const plausible = (code: string | null | undefined): string | null =>
+    code && code.length >= 8 && !code.startsWith("eyJ") && /^[A-Za-z0-9._~+/=-]+$/.test(code) ? code : null;
+
+  // An address, with or without its scheme.
   try {
-    url = new URL(pasted.trim());
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `http://${text}`);
+    const fromUrl = plausible(url.searchParams.get("code"));
+    if (fromUrl) return fromUrl;
+  } catch {
+    // not an address; try the other shapes
+  }
+  // A piece of the address: "...&code=...".
+  const match = text.match(/(?:^|[?&#\s])code=([^&#\s]+)/);
+  if (match?.[1]) return plausible(safeDecode(match[1]));
+  // The code on its own; copied out of the address bar it may still be URL-encoded.
+  if (/^\S{20,}$/.test(text)) return plausible(safeDecode(text));
+  return null;
+}
+
+function safeDecode(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
   } catch {
     return null;
   }
-  if (url.hostname !== "localhost" || url.pathname !== "/redirect") return null;
-  const code = url.searchParams.get("code");
-  return code && code.length >= 8 ? code : null;
 }
 
 async function postToken(http: Http, params: Record<string, string>, what: string, fallbackRefresh?: string): Promise<Tokens> {

@@ -46,12 +46,25 @@ test("extractCode reads the code from http and https localhost addresses", () =>
   expect(extractCode("http://localhost/redirect?code=abcdefgh%3D%3D")).toBe("abcdefgh==");
 });
 
-test("extractCode refuses anything that isn't a localhost redirect with a code", () => {
-  expect(extractCode(`https://evil.example/redirect?code=${CODE}`)).toBeNull();
-  expect(extractCode(`http://localhost/other?code=${CODE}`)).toBeNull();
+test("extractCode also takes the address without http://, a piece with code=, or the bare code", () => {
+  // Selecting the address bar by hand can drop the scheme.
+  expect(extractCode(`localhost/redirect?iss=https%3A%2F%2Fauth.riotgames.com&session_state=a.b&code=${CODE}`)).toBe(CODE);
+  expect(extractCode(`...&session_state=a.b&code=${CODE}`)).toBe(CODE);
+  expect(extractCode(`code=${CODE}`)).toBe(CODE);
+  expect(extractCode(CODE)).toBe(CODE);
+  // A bare code copied from the bar can still be URL-encoded.
+  expect(extractCode("YXMxOmZpRW1WSVhlaTFrNDZkTUlNVTAycUEu%3D%3D")).toBe("YXMxOmZpRW1WSVhlaTFrNDZkTUlNVTAycUEu==");
+});
+
+test("extractCode refuses text without a code, and anything that looks like a cookie or token", () => {
   expect(extractCode("http://localhost/redirect?state=1")).toBeNull();
-  expect(extractCode(CODE)).toBeNull(); // a bare code: ask for the whole address instead
   expect(extractCode("not a url")).toBeNull();
+  expect(extractCode("")).toBeNull();
+  expect(extractCode("code=short")).toBeNull();
+  // A JWT (an ssid cookie value, an access token) pasted by mistake is never sent to Riot as a code.
+  expect(extractCode("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl")).toBeNull();
+  expect(extractCode("http://localhost/redirect?code=eyJhbGciOiJIUzI1NiJ9.e30.sig")).toBeNull();
+  expect(extractCode("ssid=eyJhbGciOiJIUzI1NiJ9.e30.sig; clid=abc")).toBeNull();
 });
 
 test("exchangeCode posts the code form-encoded and returns all three tokens", async () => {
