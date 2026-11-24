@@ -83,9 +83,9 @@ export const wishlistCommand = new SlashCommandBuilder()
  * Guild commands show up at once, unlike global ones. `set` replaces the whole list, so turning
  * linking off also removes /link and /unlink.
  */
-export async function registerCommands(client: Client<true>, guildId: string, linking = false): Promise<void> {
+export async function registerCommands(client: Client<true>, guildId: string, linking = false, extra: Pick<typeof wishlistCommand, "toJSON">[] = []): Promise<void> {
   const guild = await client.guilds.fetch(guildId);
-  const commands = [shopCommand, wishlistCommand, previewCommand, ...(linking ? [linkCommand, unlinkCommand] : [])];
+  const commands = [shopCommand, wishlistCommand, previewCommand, ...(linking ? [linkCommand, unlinkCommand] : []), ...extra];
   await guild.commands.set(commands.map((c) => c.toJSON()));
 }
 

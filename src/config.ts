@@ -13,6 +13,13 @@ const schema = z.object({
   RIOT_SHARD: z.string().regex(/^[a-z]+$/, "lowercase letters only, e.g. ap").optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   HEALTHCHECK_URL: z.url().optional(),
+  // Match recaps (Match Recap Spec). "on" needs the Presence Intent switched on in the Developer Portal.
+  RECAP: z.enum(["on", "off"]).default("off"),
+  RECAP_CHANNEL_ID: snowflake.optional(),
+  RECAP_QUEUES: z
+    .string()
+    .regex(/^[a-z]+(,[a-z]+)*$/, "comma-separated queue names, e.g. competitive,unrated,swiftplay")
+    .default("competitive,unrated,swiftplay"),
   // HenrikDev key for recaps of followed friends (Match Recap Spec). Without it, only the linked tier.
   HENRIK_API_KEY: z.string().min(10, "looks too short for a HenrikDev key").optional(),
   // Seals members' refresh tokens (src/secretbox.ts). Without it, /link is off and only the owner is served.
