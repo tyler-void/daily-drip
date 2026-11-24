@@ -226,7 +226,9 @@ Ruled out:
 - A dead sign-in (`invalid_grant`) DMs the member once to link again, then pauses their runs until they do.
 - Refresh tokens are sealed with AES-256-GCM (`src/secretbox.ts`). The key, `TOKEN_KEY` (32 random bytes, base64), lives in `.env`, outside the data volume: a leaked `state.json` or backup alone can't be used. It doesn't protect against the key's holder or root on the server, since the bot decrypts the token to use it unattended. Losing the key means every member links again.
 
-**Not checked yet:** a real member linking through Discord, a member's daily DM after a reset, and how long a refresh token keeps working.
+**Checked on 2026-11-24 on the server:** a real member linked through `/link`, the paste form and Riot's sign-in page; their refresh token was stored sealed, and the member scheduler posted their shop in the channel 10 s later.
+
+**Not checked yet:** a member's post after a reset, a wishlist hit by DM, and how long a refresh token keeps working.
 
 ## Error handling
 
