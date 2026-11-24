@@ -18,8 +18,6 @@ import { AFTER_RESET_MS, failurePolicy, TICK_MS } from "./scheduler.ts";
 import type { ShopSnapshot } from "./shop.ts";
 
 const MINUTE = 60_000;
-/** Discord's error code when a user doesn't accept DMs: retrying before the next reset won't help. */
-const CANNOT_DM = 50007;
 export const MEMBER_GAP_MS = 5_000;
 
 export interface MemberSchedulerDeps {
@@ -90,12 +88,6 @@ export function createMemberScheduler(deps: MemberSchedulerDeps): MemberSchedule
           account.member.linkDeadNotified = true;
           await deps.save();
         }
-        return false;
-      }
-      if ((err as { code?: number }).code === CANNOT_DM) {
-        // The shop was fetched; only the DM failed. The channel note already told them. Wait for the next reset.
-        next.set(id, Math.max(afterReset(account.member?.snapshot), now() + MINUTE));
-        log.warn("a member doesn't accept DMs", { member: account.discordUsername });
         return false;
       }
       const { retryInMs } = failurePolicy(err, "");

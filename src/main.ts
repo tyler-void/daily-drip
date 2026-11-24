@@ -11,7 +11,7 @@ import { createLock } from "./lock.ts";
 import { addSecret, log } from "./log.ts";
 import { createMemberScheduler } from "./memberScheduler.ts";
 import { canStartLink, completeLink, fetchMemberShop, linkDeadText, type MemberDeps } from "./members.ts";
-import { checkDiscordSetup, createDiscordNotifier, createMemberNotifier, DiscordSetupError, startDiscord } from "./notify/discord.ts";
+import { checkDiscordSetup, createPersonNotifier, DiscordSetupError, startDiscord } from "./notify/discord.ts";
 import type { Notifier } from "./notify/notifier.ts";
 import { postShop } from "./post.ts";
 import { buildSignInUrl } from "./riot/login.ts";
@@ -71,14 +71,15 @@ if (ensureOwner(state.accounts, { discordUserId: config.DISCORD_OWNER_ID, discor
   await saveState(state);
 }
 
-const notifier = createDiscordNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID);
+// Everyone's shop goes in the channel with a ping; wishlist hits by DM. The owner's alerts stay in the channel.
+const notifier = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, config.DISCORD_OWNER_ID, "channel");
 
-// One notifier per member, kept for the process, so the "allow DMs" note goes out once.
+// One notifier per member, kept for the process, so the "allow DMs" note goes out once. A member's alerts go by DM.
 const memberNotifiers = new Map<string, Notifier>();
 const memberNotifier = (userId: string): Notifier => {
   let found = memberNotifiers.get(userId);
   if (!found) {
-    found = createMemberNotifier(client, userId, config.DISCORD_CHANNEL_ID);
+    found = createPersonNotifier(client, config.DISCORD_CHANNEL_ID, userId, "dm");
     memberNotifiers.set(userId, found);
   }
   return found;

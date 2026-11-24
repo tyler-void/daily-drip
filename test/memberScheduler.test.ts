@@ -102,16 +102,6 @@ test("other failures retry that member later and carry on with the rest", async 
   expect(s.scheduler.nextRunAt("200000000000000000")).toBe(T0 + DEFAULT_RETRY_MS);
 });
 
-test("a member who doesn't accept DMs waits for the next reset instead of retrying all day", async () => {
-  const reg = registry(1);
-  const s = setup(reg, async (a) => {
-    a.member!.snapshot = shop();
-    throw Object.assign(new Error("Cannot send messages to this user"), { code: 50007 });
-  });
-  await s.scheduler.tick();
-  expect(s.scheduler.nextRunAt("200000000000000000")).toBe(Date.parse(RESET) + AFTER_RESET_MS);
-});
-
 test("a member who unlinked is forgotten", async () => {
   const reg = registry(1);
   const s = setup(reg, async () => shop());

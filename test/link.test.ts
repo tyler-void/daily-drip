@@ -104,18 +104,21 @@ test("with linking on, a stranger is told to /link instead of 'owner only'", asy
   expect(events).toEqual([{ kind: "reply", options: { content: expect.stringContaining("/link"), flags: MessageFlags.Ephemeral } }]);
 });
 
-test("a member's /shop is their own shop, answered privately", async () => {
+test("a member's /shop is their own shop, in public, named but without a ping", async () => {
   const { interaction: i, events } = interaction(FRIEND);
   await handleShopCommand(i, deps({}));
   expect(events[0]?.options.embeds[0].title).toBe("Friend Skin");
-  expect(events[0]?.options.flags).toBe(MessageFlags.Ephemeral);
+  expect(events[0]?.options.flags).toBeUndefined();
+  expect(events[0]?.options.content).toStartWith(`<@${FRIEND}>'s **daily shop**`);
+  expect(events[0]?.options.allowedMentions).toEqual({ parse: [] });
 });
 
-test("the owner's /shop still goes in the channel", async () => {
+test("the owner's /shop is public too, named the same way", async () => {
   const { interaction: i, events } = interaction(OWNER);
   await handleShopCommand(i, deps({}));
   expect(events[0]?.options.embeds[0].title).toBe("Owner Skin");
   expect(events[0]?.options.flags).toBeUndefined();
+  expect(events[0]?.options.content).toStartWith(`<@${OWNER}>'s **daily shop**`);
 });
 
 test("a member whose sign-in died is told to link again", async () => {
@@ -128,7 +131,6 @@ test("a member whose sign-in died is told to link again", async () => {
   const { interaction: i, events } = interaction(FRIEND);
   await handleShopCommand(i, deps({}, friend));
   expect(events.map((e) => e.kind)).toEqual(["defer", "edit"]);
-  expect(events[0]?.options.flags).toBe(MessageFlags.Ephemeral);
   expect(events[1]?.options.content).toBe(linkDeadText());
 });
 

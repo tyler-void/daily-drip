@@ -57,7 +57,7 @@ To replace the cookie later, overwrite `config/riot-cookie`; the bot notices wit
 
 Optional. Set `TOKEN_KEY` (`openssl rand -base64 32`) in `.env` and restart: `/link` and `/unlink` appear in your server.
 
-A friend runs `/link`, presses **Sign in with Riot**, and signs in on Riot's own page. Their browser then lands on a `http://localhost/redirect?code=…` page that doesn't load; they copy that address and paste it into the form. The bot trades the one-time code for a sign-in token, keeps it encrypted with `TOKEN_KEY`, and from then on DMs them their shop after each reset. `/unlink` deletes it.
+A friend runs `/link`, presses **Sign in with Riot**, and signs in on Riot's own page. Their browser then lands on a `http://localhost/redirect?code=…` page that doesn't load; they copy that address and paste it into the form. The bot trades the one-time code for a sign-in token and keeps it encrypted with `TOKEN_KEY`. From then on, their shop is posted in your shop channel after each reset and pings them, like yours; their wishlist stays private, and hits come to them by DM. `/unlink` deletes it.
 
 Nobody types a password or a cookie into Discord. Still, the server ends up holding a sign-in to each friend's account, so only offer this to people who trust you with that, and keep it to a few. At most 10 members can link. Losing `TOKEN_KEY` means everyone links again.
 

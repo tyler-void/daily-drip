@@ -21,8 +21,17 @@ export interface DiscordMessage {
 
 const vp = (amount: number) => `${new Intl.NumberFormat("en-US").format(amount)} VP`;
 
-/** One message, one embed per skin; the text is a live countdown to the reset. */
-export function shopMessage(snapshot: ShopSnapshot): DiscordMessage {
+/** Whose shop a post shows, and whether it pings them: the post after a reset does, a /shop reply doesn't. */
+export interface ShopHolder {
+  userId: string;
+  ping: boolean;
+}
+
+/**
+ * One message, one embed per skin; the text is a live countdown to the reset. With `holder`, it
+ * names whose shop it is, since everyone's shop is posted in the same channel.
+ */
+export function shopMessage(snapshot: ShopSnapshot, holder?: ShopHolder): DiscordMessage {
   const resetsAt = Math.floor(Date.parse(snapshot.expiresAt) / 1000);
   const embeds = snapshot.offers.map((offer) => {
     const embed = new EmbedBuilder().setTitle(offer.name).setDescription(offer.vp !== null ? `**${vp(offer.vp)}**` : "Price unknown");
@@ -32,7 +41,14 @@ export function shopMessage(snapshot: ShopSnapshot): DiscordMessage {
     return embed.toJSON();
   });
   // <t:…:R> renders as "in 20 hours" in each viewer's own time zone, and keeps counting.
-  return { content: `**Daily shop** · resets <t:${resetsAt}:R>`, embeds, allowedMentions: { parse: [] } };
+  const countdown = `resets <t:${resetsAt}:R>`;
+  if (!holder) return { content: `**Daily shop** · ${countdown}`, embeds, allowedMentions: { parse: [] } };
+  return {
+    content: `<@${holder.userId}>'s **daily shop** · ${countdown}`,
+    embeds,
+    // Without the ping, the mention still shows the name; it just doesn't notify.
+    allowedMentions: holder.ping ? { users: [holder.userId] } : { parse: [] },
+  };
 }
 
 export function wishlistMessage(hits: ShopOffer[], ownerId: string): DiscordMessage {
@@ -89,58 +105,58 @@ export async function startDiscord(token: string): Promise<Client<true>> {
 }
 
 /** Discord's error code when a user doesn't accept DMs from the bot. */
-const CANNOT_DM = 50007;
+export const CANNOT_DM = 50007;
+
+export const DM_BLOCKED_NOTE =
+  "I tried to send you a private message (a wishlist hit, or a note about your link), but your Discord settings block DMs from this server's members. Allow them in this server's Privacy Settings.";
 
 /**
- * A member's notifier: their shop, wishlist hits and alerts go to them by DM, since a member's shop
- * is their own. If they don't accept DMs, one short note in the channel tells them how to fix it;
- * the shop itself is never posted there. The note is sent at most once per process.
+ * One person's notifier, the owner's or a member's (spec: Schedule & notifications; Accounts).
+ *
+ * - Their shop is posted in the channel and pings them: everyone's shop is public.
+ * - Wishlist hits go to them by DM, before the shop: a wishlist is private.
+ * - Alerts go to the channel for the owner (cookie, Cloudflare, dead-man), by DM for a member.
+ *
+ * If someone blocks DMs, one note in the channel (once per process) asks them to allow them. It
+ * never names a skin, and the shop is still posted.
  */
-export function createMemberNotifier(client: Client, userId: string, fallbackChannelId: string): Notifier {
+export function createPersonNotifier(client: Client, channelId: string, userId: string, alerts: "channel" | "dm"): Notifier {
   let noteSent = false;
-  async function dm(message: DiscordMessage): Promise<void> {
-    try {
-      const user = await client.users.fetch(userId);
-      await user.send(message);
-    } catch (err) {
-      if ((err as { code?: number }).code !== CANNOT_DM) throw err;
-      if (!noteSent) {
-        const channel = await client.channels.fetch(fallbackChannelId);
-        if (channel?.isSendable()) {
-          await channel.send(
-            alertMessage("I can't send you your daily shop: your Discord settings block DMs from this server's members. Allow them under Privacy Settings for this server, then use `/shop`.", userId),
-          );
-          noteSent = true;
-        }
-      }
-      throw err;
-    }
-  }
-  return {
-    async sendShop(snapshot, wishlistHits) {
-      if (wishlistHits.length > 0) await dm(wishlistMessage(wishlistHits, userId));
-      await dm(shopMessage(snapshot));
-    },
-    async sendAlert(text) {
-      await dm({ content: text, embeds: [], allowedMentions: { parse: [] } });
-    },
-  };
-}
 
-export function createDiscordNotifier(client: Client, channelId: string, ownerId: string): Notifier {
   async function channel() {
     const found = await client.channels.fetch(channelId);
     if (!found?.isSendable()) throw new Error(`Discord channel ${channelId} was not found, or the bot cannot send messages there`);
     return found;
   }
+
+  /** DMs the person. Returns false if they block DMs (after leaving the note); throws on other errors. */
+  async function dm(message: DiscordMessage): Promise<boolean> {
+    try {
+      const user = await client.users.fetch(userId);
+      await user.send(message);
+      return true;
+    } catch (err) {
+      if ((err as { code?: number }).code !== CANNOT_DM) throw err;
+      if (!noteSent) {
+        await (await channel()).send(alertMessage(DM_BLOCKED_NOTE, userId));
+        noteSent = true;
+      }
+      return false;
+    }
+  }
+
   return {
     async sendShop(snapshot, wishlistHits) {
-      const target = await channel();
-      if (wishlistHits.length > 0) await target.send(wishlistMessage(wishlistHits, ownerId));
-      await target.send(shopMessage(snapshot));
+      // The private hit first: if the public post fails and is retried, a repeated DM is the lesser harm.
+      if (wishlistHits.length > 0) await dm(wishlistMessage(wishlistHits, userId));
+      await (await channel()).send(shopMessage(snapshot, { userId, ping: true }));
     },
     async sendAlert(text) {
-      await (await channel()).send(alertMessage(text, ownerId));
+      if (alerts === "channel") {
+        await (await channel()).send(alertMessage(text, userId));
+        return;
+      }
+      if (!(await dm({ content: text, embeds: [], allowedMentions: { parse: [] } }))) throw new Error("could not DM the alert: they block DMs");
     },
   };
 }

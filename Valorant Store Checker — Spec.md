@@ -164,10 +164,10 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 6. After each successful run, call `HEALTHCHECK_URL` if it is set. The external monitor alerts when the pings stop, which covers what the in-process switch cannot: the container or the machine being down. On healthchecks.io, set the check's period to 1 day and its grace time to 2 hours.
 7. An alert's flag is set only once the alert has been sent; one that fails to send goes out on the next failure. Alert texts pass through the redacting logger's `redact()` first.
 
-**Messages (Discord)**, all in `DISCORD_CHANNEL_ID`:
+**Messages (Discord).** Everyone's shop is public; wishlists are private.
 
-- Daily shop: one message with 4 embeds. Each embed has the skin name as title, the VP price, `displayIcon` as the image and the tier colour (E9) as its colour. The message text is `Resets <t:{expiresAt}:R>`, which Discord shows as a live countdown.
-- Wishlist hit: a separate message sent before the shop, naming the skin and mentioning `<@DISCORD_OWNER_ID>` so it pings.
+- Daily shop, in `DISCORD_CHANNEL_ID`: one message with 4 embeds per person, the owner and each linked member. Each embed has the skin name as title, the VP price, `displayIcon` as the image and the tier colour (E9) as its colour. The text is `<@person>'s daily shop · resets <t:{expiresAt}:R>`: it names whose shop it is and pings them, and Discord shows the reset as a live countdown.
+- Wishlist hit: a DM to that person, sent before their shop, naming the skin. A wishlist is private, so hits never go in the channel. If someone blocks DMs from server members, one note in the channel (once per process) asks them to allow them; it names no skin, and the shop is still posted.
 - Cookie dead: one message mentioning the owner, with the steps to grab a new cookie and overwrite the cookie file.
 - `lastSentHash` is written only after Discord accepts the message.
 
@@ -175,10 +175,10 @@ The process is long-running and re-arms itself from the shop's own expiry. There
 
 - Gateway intent `Guilds` only; no privileged intents.
 - Slash commands are registered to `DISCORD_GUILD_ID` on start, so changes show up at once.
-- `/shop` is owner-only: if `interaction.user.id` is not `DISCORD_OWNER_ID`, reply with an ephemeral refusal. It replies with the cached snapshot while its `expiresAt` is in the future; otherwise it starts a run and replies with the result (or the cookie-dead notice).
+- `/shop` answers the owner and linked members, each about their own account, in public and named like the daily post but without a ping. Anyone else gets an ephemeral refusal (or, with linking on, a pointer to `/link`). It replies with the cached snapshot while its `expiresAt` is in the future; otherwise it starts a run and replies with the result (or the cookie-dead or link-again notice). `/wishlist` replies are always ephemeral.
 - Every run, scheduled or from `/shop`, takes one lock, so two reauths never overlap. Overlapping reauths would both rotate the cookie and one rotation would be lost.
 - No command accepts a cookie: pasting one into Discord would store it on Discord's servers.
-- Phone push: in the Discord app, set the channel's notifications to All Messages.
+- Phone push: each shop post mentions its person, so the channel's default "Only @mentions" notifications are enough.
 
 **Wishlist:** managed with `/wishlist` and kept in `state.json`, because `config/` is mounted read-only on the server. If a `config/wishlist.json` (a JSON array of strings) exists on the first start, it is imported once. Entries are skin names, parts of one, or UUIDs; names match `displayName` case-insensitively as substrings ("Reaver" matches every Reaver skin). At most 25 entries, each 2 to 64 characters, so `/wishlist list` stays under Discord's 2000-character limit.
 
@@ -220,9 +220,9 @@ Ruled out:
 **Built** (on with `TOKEN_KEY`; without it the bot serves only the owner):
 
 - `/link` answers privately with the steps, a "Sign in with Riot" button and a "Paste the address" button that opens a form. `/unlink` deletes the member's entry: sign-in token, shop and wishlist. It can't end the Riot sign-in itself, so the reply points to "Sign out of all devices" in the Riot account settings.
-- `/shop` and `/wishlist` answer a linked member about their own account, privately. Anyone else who isn't the owner is told to `/link`.
+- `/shop` and `/wishlist` answer a linked member about their own account: `/shop` in public, `/wishlist` privately. Anyone else who isn't the owner is told to `/link`. `/link` tells members before they sign in that their shop will be public and their wishlist private.
 - Each member's shop runs 90 s after their reset, members one after another, 5 s apart, under the shared run lock (`src/memberScheduler.ts`). A rate limit or a Cloudflare block stops the round for everyone.
-- Members get their shop and wishlist hits by DM. If they block DMs from server members, one note in the channel says how to fix it; their shop is never posted there.
+- Members' shops are posted in the channel and ping them, like the owner's; their wishlist hits and the link-again alert go by DM (Messages, above).
 - A dead sign-in (`invalid_grant`) DMs the member once to link again, then pauses their runs until they do.
 - Refresh tokens are sealed with AES-256-GCM (`src/secretbox.ts`). The key, `TOKEN_KEY` (32 random bytes, base64), lives in `.env`, outside the data volume: a leaked `state.json` or backup alone can't be used. It doesn't protect against the key's holder or root on the server, since the bot decrypts the token to use it unattended. Losing the key means every member links again.
 

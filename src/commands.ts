@@ -143,17 +143,17 @@ export async function handleShopCommand(interaction: CommandInteraction, deps: C
     await interaction.reply({ content: refusal(deps), flags: MessageFlags.Ephemeral });
     return;
   }
-  // The owner's shop goes in the channel, like the daily post; a member's is only for them.
-  const isOwner = interaction.user.id === deps.ownerId;
+  // Everyone's shop is public, like the daily post; the reply names whose it is, without a ping.
+  const holder = { userId: interaction.user.id, ping: false };
   const cached = liveSnapshot(shop, deps);
   if (cached) {
-    await interaction.reply(isOwner ? shopMessage(cached) : { ...shopMessage(cached), flags: MessageFlags.Ephemeral });
+    await interaction.reply(shopMessage(cached, holder));
     return;
   }
   // A run takes a second or two; Discord wants an answer within 3 s, so defer first.
-  await (isOwner ? interaction.deferReply() : interaction.deferReply({ flags: MessageFlags.Ephemeral }));
+  await interaction.deferReply();
   try {
-    await interaction.editReply(shopMessage(await shop.runShop()));
+    await interaction.editReply(shopMessage(await shop.runShop(), holder));
   } catch (err) {
     const text =
       err instanceof CookieDeadError
@@ -310,6 +310,7 @@ export const LINK_STEPS = [
   "2. Your browser then lands on a page that fails to load. Copy its whole address: it starts with `http://localhost/redirect?` and contains `code=`.",
   "3. Press **Paste the address** and paste it within a few minutes.",
   "",
+  "After each reset, your shop is posted in this server's shop channel, for everyone to see, and pings you. Your wishlist stays private: hits come to you by DM.",
   "The bot keeps a sign-in token for your account, encrypted, and uses it only to read your daily shop. `/unlink` deletes it.",
 ].join("\n");
 
@@ -388,7 +389,7 @@ export async function handleLinkModal(interaction: LinkModalInteraction, deps: C
     const pasted = interaction.fields.getTextInputValue(LINK_ADDRESS_FIELD);
     const result = await deps.members.finishLink({ id: interaction.user.id, username: interaction.user.username }, pasted);
     text = result.ok
-      ? `Linked${result.value.riotName ? ` as **${result.value.riotName}**` : ""}. Your shop arrives by DM after each reset, and \`/shop\` shows it now.`
+      ? `Linked${result.value.riotName ? ` as **${result.value.riotName}**` : ""}. Your shop is posted in the shop channel after each reset, with a ping; wishlist hits come by DM. \`/shop\` shows it now.`
       : result.reason;
   } catch (err) {
     text = redact(`Couldn't finish linking: ${err instanceof Error ? err.message : String(err)}. Try \`/link\` again.`);
