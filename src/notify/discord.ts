@@ -125,12 +125,51 @@ export async function checkDiscordSetup(client: Client<true>, guildId: string, c
   }
 }
 
-/** Log in with the Guilds intent only (spec: Bot) and wait until the client is ready. */
-export async function startDiscord(token: string): Promise<Client<true>> {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-  const ready = new Promise<Client<true>>((resolve) => client.once(Events.ClientReady, resolve));
-  await client.login(token);
-  return ready;
+/** Discord refused a privileged intent (gateway close 4014): it isn't switched on in the Developer Portal. */
+export class DisallowedIntentsError extends Error {
+  name = "DisallowedIntentsError";
+}
+
+/**
+ * Log in and wait until the client is ready. The Guilds intent only (spec: Bot), plus GuildPresences
+ * for match recaps when asked (Match Recap Spec: Discord setup). A refused privileged intent doesn't
+ * make login() fail: the shard just disconnects and "ready" never comes, so that is raced here.
+ */
+export async function startDiscord(token: string, options: { presences?: boolean } = {}): Promise<Client<true>> {
+  const intents = [GatewayIntentBits.Guilds, ...(options.presences ? [GatewayIntentBits.GuildPresences] : [])];
+  const client = new Client({ intents });
+  const ready = new Promise<Client<true>>((resolve, reject) => {
+    client.once(Events.ClientReady, resolve);
+    client.on(Events.ShardDisconnect, (event) => {
+      if (event.code === 4014) {
+        reject(new DisallowedIntentsError("Discord refused the Presence Intent: turn it on in the Developer Portal under Bot -> Privileged Gateway Intents"));
+      }
+    });
+  });
+  try {
+    await client.login(token);
+    return await ready;
+  } catch (err) {
+    await client.destroy();
+    throw err;
+  }
+}
+
+/** Posting and editing in one channel, for match recaps (they're edited when a late RR arrives). */
+export function createChannelPoster(client: Client, channelId: string) {
+  async function channel() {
+    const found = await client.channels.fetch(channelId);
+    if (!found?.isSendable() || !("messages" in found)) throw new Error(`Discord channel ${channelId} was not found, or the bot cannot send messages there`);
+    return found;
+  }
+  return {
+    async post(message: DiscordMessage): Promise<string> {
+      return (await (await channel()).send(message)).id;
+    },
+    async edit(messageId: string, message: DiscordMessage): Promise<void> {
+      await (await channel()).messages.edit(messageId, message);
+    },
+  };
 }
 
 /**
