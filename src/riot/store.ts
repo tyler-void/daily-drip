@@ -29,7 +29,7 @@ export interface Storefront {
 export const storefrontUrl = (session: Session) => `https://pd.${session.shard}.a.pvp.net/store/v3/storefront/${session.puuid}`;
 export const offersUrl = (session: Session) => `https://pd.${session.shard}.a.pvp.net/store/v1/offers/`;
 
-function gameHeaders(session: Session, clientVersion: string): Record<string, string> {
+export function gameHeaders(session: Session, clientVersion: string): Record<string, string> {
   return {
     Authorization: `Bearer ${session.accessToken}`,
     "X-Riot-Entitlements-JWT": session.entitlementsToken,
